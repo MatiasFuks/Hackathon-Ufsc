@@ -306,10 +306,20 @@ def normalize_bandit(payload: dict, repo: str) -> tuple[list[Finding], int]:
 
         if test_id == "B608":
             origin, detail = _sqli_origin(repo, rel, line)
+            if origin == "literal":
+                # Domínio fechado (dict de chaves constantes): NÃO é injetável.
+                # Descartar, e não rebaixar a confiança, é deliberado: a
+                # severidade-base de SQLi é Crítica, então mesmo com
+                # Confidence.BAIXA o scoring entrega 100*2.0*0.5 = 100, que
+                # ainda é prioridade Alta. Um não-problema sobreviveria no
+                # relatório acima de dívidas reais — e este caso
+                # (`everything.py:205`) é a armadilha FP-03 que o
+                # findings-ground-truth.md plantou de propósito.
+                discarded += 1
+                continue
             confidence = {
                 "tainted": Confidence.ALTA,
                 "internal": Confidence.MEDIA,
-                "literal": Confidence.BAIXA,
             }[origin]
             description = f"{description} Origem do valor interpolado: {detail}."
             corroboration.append(f"builtin:origin={origin}")
@@ -347,7 +357,10 @@ def run_bandit(repo: str) -> tuple[list[Finding], ToolRun]:
 
     findings, discarded = normalize_bandit(payload, repo)
     status = ToolRun("bandit", available=True, ok=True, findings=len(findings))
-    status.notes.append(f"{discarded} achados fora do mandato descartados")
+    status.notes.append(
+        f"{discarded} achados descartados: fora do mandato, ou SQLi de domínio "
+        f"fechado que a análise de origem provou não ser injetável"
+    )
     if not any(f.rule_id == "bandit:B201" for f in findings):
         status.notes.append(
             "B201 ausente: esperado — run.py não importa flask, o bandit não "

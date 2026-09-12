@@ -177,6 +177,62 @@ class ConfiancaDoSqli(unittest.TestCase):
             shutil.rmtree(repo)
 
 
+class PropriedadeConstanteNaoEInjetavel(unittest.TestCase):
+    """
+    Equivalente PHP do FP-03 (o `TABLE_MAP` em f-string do repo Python).
+
+    `protected $table = 'customers'` interpolado em SQL tem domínio fechado —
+    não é injetável. É a mesma decisão que a análise de AST do detector Python
+    já toma para dict de chaves literais.
+    """
+
+    FIXTURE = '''<?php
+class M
+{
+    protected $table = "customers";
+
+    public function soConstante($id)
+    {
+        return DB::select("SELECT * FROM {$this->table} WHERE id = ?", [$id]); // MARK-LITERAL
+    }
+
+    public function constanteMaisParametro($month)
+    {
+        return DB::select("SELECT * FROM {$this->table} WHERE m = '$month'"); // MARK-MISTO
+    }
+
+    public function propriedadeNaoConstante()
+    {
+        return DB::select("SELECT * FROM h WHERE c = {$this->id}"); // MARK-DINAMICO
+    }
+}
+'''
+
+    def setUp(self):
+        self.repo = _repo_temporario({"app/M.php": self.FIXTURE})
+        self.achados = {f.line: f for f in scan_sql_injection(self.repo)}
+
+    def tearDown(self):
+        shutil.rmtree(self.repo)
+
+    def _linha(self, marca):
+        for i, l in enumerate(self.FIXTURE.splitlines(), start=1):
+            if marca in l:
+                return i
+        raise AssertionError(marca)
+
+    def test_so_propriedade_constante_nao_e_reportado(self):
+        self.assertNotIn(self._linha("MARK-LITERAL"), self.achados)
+
+    def test_constante_junto_com_parametro_do_request_continua_sendo_achado(self):
+        """A supressão não pode engolir SQLi real que divide a mesma string."""
+        self.assertIn(self._linha("MARK-MISTO"), self.achados)
+
+    def test_propriedade_sem_valor_literal_continua_sendo_achado(self):
+        """`$this->id` vem do banco, não é domínio fechado."""
+        self.assertIn(self._linha("MARK-DINAMICO"), self.achados)
+
+
 class DeteccaoDeSegredos(unittest.TestCase):
     FIXTURE = """<?php
 class Config
@@ -277,6 +333,66 @@ class HashDeSenha(unittest.TestCase):
             shutil.rmtree(repo)
 
 
+class EnvCommitado(unittest.TestCase):
+    """
+    Q5 — antes era AFIRMADO sem verificação.
+
+    O detector declarava Q5 coberto apoiado num comentário no docstring, e o
+    scorecard imprimia "conforme". Afirmar conformidade sem ter olhado é o erro
+    do comercial da HourTrack — o mesmo que este pipeline existe para expor.
+    """
+
+    def test_env_example_do_laravel_e_template_e_nao_conta(self):
+        from detectors.php import verificar_env_commitado
+        repo = _repo_temporario({".env.example": "APP_KEY=\nDB_PASSWORD=\nAPP_DEBUG=true\n"})
+        try:
+            achados, veredito = verificar_env_commitado(repo)
+            self.assertEqual(achados, [])
+            self.assertIn("conforme", veredito)
+        finally:
+            shutil.rmtree(repo)
+
+    def test_env_real_com_credencial_e_achado(self):
+        from detectors.php import verificar_env_commitado
+        repo = _repo_temporario({".env": "APP_DEBUG=false\nDB_PASSWORD=senhaDeProducao123\n"})
+        try:
+            achados, _ = verificar_env_commitado(repo)
+            self.assertEqual(len(achados), 1)
+            self.assertEqual(achados[0].questionnaire_item, "Q5")
+        finally:
+            shutil.rmtree(repo)
+
+    def test_env_real_so_com_chave_vazia_nao_e_achado(self):
+        """`.env` versionado mas sem valor preenchido não vaza credencial."""
+        from detectors.php import verificar_env_commitado
+        repo = _repo_temporario({".env": "APP_KEY=\nDB_PASSWORD=\n"})
+        try:
+            achados, veredito = verificar_env_commitado(repo)
+            self.assertEqual(achados, [])
+            self.assertIn("sem valor sensível", veredito)
+        finally:
+            shutil.rmtree(repo)
+
+    def test_nao_vaza_o_valor_da_credencial_na_evidencia(self):
+        """O relatório é compartilhado; não pode carregar o segredo dentro."""
+        from detectors.php import verificar_env_commitado
+        repo = _repo_temporario({".env": "MAIL_PASSWORD=segredoQueNaoPodeVazar\n"})
+        try:
+            achados, _ = verificar_env_commitado(repo)
+            self.assertNotIn("segredoQueNaoPodeVazar", achados[0].evidence)
+            self.assertNotIn("segredoQueNaoPodeVazar", achados[0].description)
+        finally:
+            shutil.rmtree(repo)
+
+    def test_variavel_nao_sensivel_e_ignorada(self):
+        from detectors.php import verificar_env_commitado
+        repo = _repo_temporario({".env": "APP_NAME=HourTrack\nAPP_URL=http://x\n"})
+        try:
+            self.assertEqual(verificar_env_commitado(repo)[0], [])
+        finally:
+            shutil.rmtree(repo)
+
+
 class FiltroDeRuidoDoPhpstan(unittest.TestCase):
     """FP-04: sem as deps do Laravel, o phpstan vira gerador de ruído."""
 
@@ -310,6 +426,58 @@ class FiltroDeRuidoDoPhpstan(unittest.TestCase):
     def test_confianca_media_porque_o_phpstan_ve_o_codigo_pela_metade(self):
         achados, _, _ = normalize_phpstan(self._payload("Undefined variable: $x"), "/repo")
         self.assertEqual(achados[0].confidence, Confidence.MEDIA)
+
+    def test_metodo_herdado_do_framework_nao_e_achado_sem_vendor(self):
+        """
+        Regressão do falso positivo real: `SyncData extends Command` (Laravel).
+        Sem `vendor/`, o phpstan não resolve a classe-mãe e TODO método herdado
+        vira "undefined method" — deu 8 falsos positivos no alvo. A mensagem
+        não cita Illuminate, então o filtro da causa não a pegava.
+        """
+        payload = self._payload(
+            "Call to an undefined method App\\Console\\Commands\\SyncData::option().",
+            "Call to an undefined method App\\Console\\Commands\\SyncData::info().",
+            "Access to an undefined property App\\Models\\Customer::$name.",
+        )
+        achados, ruido, _ = normalize_phpstan(payload, "/repo", deps_instaladas=False)
+        self.assertEqual(achados, [])
+        self.assertEqual(ruido, 3)
+
+    def test_com_vendor_instalado_o_mesmo_erro_vira_achado_legitimo(self):
+        """O filtro é condicional: com deps instaladas, método inexistente é real."""
+        payload = self._payload("Call to an undefined method App\\X::naoExiste().")
+        achados, _, _ = normalize_phpstan(payload, "/repo", deps_instaladas=True)
+        self.assertEqual(len(achados), 1)
+
+    def test_comparacao_sempre_verdadeira_nao_e_debito(self):
+        """
+        FP-05: `if ($m >= 1 && $m <= 3) elseif ($m >= 4 ...)` — numa cadeia de
+        faixas o limite inferior é redundante para o phpstan, mas é o que deixa
+        o código legível. Reportar como débito é ruído elevado a achado.
+        """
+        payload = self._payload(
+            'Comparison operation ">=" between 1|2|3|4|5|6|7|8|9|10|11|12 and 1 is always true.')
+        achados, _, fora = normalize_phpstan(payload, "/repo")
+        self.assertEqual(achados, [])
+        self.assertEqual(fora, 1)
+
+
+class DependenciasDoAlvo(unittest.TestCase):
+    def test_detecta_ausencia_de_vendor(self):
+        from detectors.php import dependencias_instaladas
+        repo = _repo_temporario({"composer.json": "{}"})
+        try:
+            self.assertFalse(dependencias_instaladas(repo))
+        finally:
+            shutil.rmtree(repo)
+
+    def test_detecta_vendor_instalado(self):
+        from detectors.php import dependencias_instaladas
+        repo = _repo_temporario({"vendor/autoload.php": "<?php"})
+        try:
+            self.assertTrue(dependencias_instaladas(repo))
+        finally:
+            shutil.rmtree(repo)
 
 
 class ComplexidadeDoPhpmetrics(unittest.TestCase):
@@ -348,6 +516,42 @@ class ComplexidadeDoPhpmetrics(unittest.TestCase):
     def test_payload_invalido_nao_quebra(self):
         self.assertEqual(normalize_phpmetrics("lixo", "/repo"), [])
         self.assertEqual(normalize_phpmetrics({"X": {"ccn": "n/a"}}, "/repo"), [])
+
+    def test_aponta_para_a_declaracao_da_classe_e_nao_para_a_linha_1(self):
+        """
+        Regressão: o phpmetrics não emite linha nenhuma (`file`=None, `methods`
+        só com nomes). O achado caía no default da linha 1 e a evidência virava
+        `<?php` — verdadeiro, mas inacionável.
+        """
+        repo = _repo_temporario({"app/Helpers/DateHelper.php":
+                                 "<?php\n\nnamespace App\\Helpers;\n\nclass DateHelper\n{\n}\n"})
+        try:
+            achados = normalize_phpmetrics({"App\\Helpers\\DateHelper": {"ccn": 36}}, repo)
+            self.assertEqual(achados[0].line, 5)
+            self.assertIn("class DateHelper", achados[0].evidence)
+        finally:
+            shutil.rmtree(repo)
+
+    def test_classe_final_ou_abstract_tambem_e_localizada(self):
+        repo = _repo_temporario({"app/X.php": "<?php\nfinal class X\n{\n}\n"})
+        try:
+            achados = normalize_phpmetrics({"App\\X": {"ccn": 20}}, repo)
+            self.assertEqual(achados[0].line, 2)
+        finally:
+            shutil.rmtree(repo)
+
+    def test_arquivo_ausente_cai_na_linha_1_sem_quebrar(self):
+        """Evidência ruim é melhor que perder o achado."""
+        achados = normalize_phpmetrics({"App\\Sumiu": {"ccn": 20}}, "/nao/existe")
+        self.assertEqual(achados[0].line, 1)
+
+    def test_nomes_dos_metodos_vao_para_metrics(self):
+        achados = normalize_phpmetrics(
+            {"App\\X": {"ccn": 20, "ccnMethodMax": 12,
+                        "methods": [{"name": "handle"}, {"name": "run"}]}},
+            "/repo")
+        self.assertEqual(achados[0].metrics["metodos"], ["handle", "run"])
+        self.assertEqual(achados[0].metrics["cc_metodo_max"], 12)
 
 
 class MetricasDoPhploc(unittest.TestCase):
@@ -488,9 +692,18 @@ class IntegracaoNoRepoAlvo(unittest.TestCase):
         for local in seguros:
             self.assertNotIn(local, self.por_local, f"falso positivo em {local}")
 
-    def test_oito_credenciais_hardcoded(self):
-        """4 em NotificationService, 3 em SyncData (ERP, CRM, Slack), 1 em ReportController."""
-        self.assertEqual(len(self._dt("DT-04")), 8)
+    def test_sete_credenciais_hardcoded(self):
+        """
+        3 em NotificationService, 3 em SyncData (ERP, CRM, Slack), 1 em
+        ReportController. NÃO conta `$pushAppId`: App ID do OneSignal é
+        identificador público, não credencial — ver `_NOME_DE_SEGREDO`.
+        """
+        self.assertEqual(len(self._dt("DT-04")), 7)
+
+    def test_app_id_publico_nao_e_reportado_como_credencial(self):
+        """Regressão do falso positivo: o bandit, no lado Python, também não o reporta."""
+        variaveis = {f.metrics.get("variavel") for f in self._dt("DT-04")}
+        self.assertNotIn("pushAppId", variaveis)
 
     def test_config_com_env_nao_gera_falso_positivo(self):
         """`config/` tem 8+ chaves credenciais vindas de env() — nenhuma é débito."""
@@ -513,11 +726,15 @@ class IntegracaoNoRepoAlvo(unittest.TestCase):
         """
         self.assertEqual(self._dt("DT-03"), [])
 
-    def test_debug_do_template_nao_derruba_item_do_questionario(self):
-        debug = self._dt("DT-05")
-        self.assertEqual(len(debug), 1)
-        self.assertIsNone(debug[0].questionnaire_item)
-        self.assertEqual(debug[0].confidence, Confidence.MEDIA)
+    def test_env_example_do_laravel_nao_e_reportado(self):
+        """
+        Regressão: `.env.example` é o skeleton intocado do Laravel
+        (`APP_NAME=Laravel`, `APP_KEY=` vazio). `APP_DEBUG=true` ali é o
+        default correto do framework, não dívida. Reportar marcaria como
+        débito todo projeto Laravel que existe.
+        """
+        self.assertEqual(self._dt("DT-05"), [])
+        self.assertFalse([f for f in self.achados if f.file.startswith(".env")])
 
     def test_log_sensivel_no_middleware(self):
         log = self._dt("DT-08")

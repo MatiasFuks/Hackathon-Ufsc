@@ -46,6 +46,27 @@ Cegueiras conhecidas deste detector
 - A classificação de origem ignora escopo dentro do arquivo, igual à do
   detector Python. Documentado em teste.
 - Q6 (debug) nunca é declarado coberto — ver `ITENS_NAO_ASSEGURADOS`.
+
+Riscos latentes de falso positivo (medidos, NÃO corrigidos de propósito)
+------------------------------------------------------------------------
+Testados com repositórios adversariais: nenhum ocorre no código-alvo, e cada
+correção trocaria um falso positivo hipotético por um falso NEGATIVO possível.
+Em detector de segurança essa troca é ruim, então ficam documentados:
+
+1. `scan_rotas_sem_auth` só olha `routes/`. O Laravel também aceita
+   `$this->middleware('auth')` no construtor do controller. Checar isso
+   suprimiria o achado quando QUALQUER controller tivesse auth, escondendo
+   rotas realmente desprotegidas. (No alvo: nenhum controller usa.)
+2. `scan_log_sensivel` exige acessor e sink no mesmo ARQUIVO, não na mesma
+   função. Um arquivo que valida `$request->all()` e, à parte, insere dado não
+   relacionado dispara. Separar exigiria achar fronteira de função sem parser
+   (contagem de chaves), que erra dentro de string e comentário — modo de
+   falha novo, gerando FP e FN. (No alvo: mesma função, 7 linhas de distância.)
+3. `scan_xss_blade` não distingue `{!! $htmlConfiavel !!}` intencional de
+   descuido. Não é corrigível sem saber a origem do valor; qualquer heurística
+   por nome de variável seria chute.
+4. `verificar_env_commitado` trata `.env.testing` como arquivo real. Excluí-lo
+   criaria ponto cego para credencial real commitada ali.
 """
 from __future__ import annotations
 
@@ -83,11 +104,6 @@ DEBITOS: dict[str, dict] = {
         questionnaire_item="Q4", effort=2.0,
         title="Credencial hardcoded no código-fonte",
     ),
-    "DT-05": dict(
-        category=Category.SEGURANCA, severity=Severity.MEDIA, cwe=489,
-        questionnaire_item=None, effort=0.5,
-        title="Template de ambiente com debug habilitado",
-    ),
     "DT-06": dict(
         category=Category.SEGURANCA, severity=Severity.CRITICA, cwe=306,
         questionnaire_item="1.1", effort=8.0,
@@ -102,14 +118,13 @@ DEBITOS: dict[str, dict] = {
 
 # Itens do questionário que este detector NÃO pode assegurar.
 #
-# Q6 (debug em produção): achamos `APP_DEBUG=true` no `.env.example`, mas isso
-# é o TEMPLATE, não a configuração de produção — e o `.env` real, corretamente,
-# não está no repo. `config/app.php` inclusive usa `env('APP_DEBUG', false)`,
-# que é o default certo. Afirmar "Q6 = NÃO" a partir de um template seria
-# afirmar mais do que a evidência sustenta; afirmar "Q6 = sim" seria pior
-# ainda. O achado DT-05 é emitido (o template é o que o time copia no deploy,
-# que é `git pull` sem staging), mas SEM `questionnaire_item`, e Q6 aparece no
-# scorecard como "sem cobertura": ninguém verificou a produção de fato.
+# Q6 (debug em produção): a configuração de produção não está no repositório —
+# e é certo que não esteja. O único sinal disponível é `APP_DEBUG=true` no
+# `.env.example`, que é o skeleton intocado do Laravel e está CORRETO (aquele
+# arquivo serve a desenvolvimento local). `config/app.php` usa
+# `env('APP_DEBUG', false)`, o default seguro. Não há evidência para afirmar
+# "Q6 = NÃO" nem para afirmar "Q6 = sim", então Q6 fica "sem cobertura":
+# ninguém verificou a produção de fato. Ver o bloco de DT-05 mais abaixo.
 ITENS_NAO_ASSEGURADOS = {"Q6"}
 
 # ---------------------------------------------------------------------------
@@ -128,6 +143,28 @@ RUIDO_PHPSTAN = (
     re.compile(r"used constant .* not found", re.I),
 )
 
+# ---------------------------------------------------------------------------
+# Ruído de SEGUNDA ORDEM — só existe quando as dependências não estão instaladas.
+#
+# Este é o filtro que faltava, e a falha era silenciosa. `RUIDO_PHPSTAN` pega a
+# CAUSA ("SyncData extends unknown class Illuminate\Console\Command"), mas não
+# a CONSEQUÊNCIA: com a classe-mãe irresolvível, todo método herdado vira
+# "Call to an undefined method App\...\SyncData::option()". Essa mensagem não
+# menciona Illuminate em lugar nenhum, então passava pelo filtro e virava 8
+# achados — `option`, `info`, `error`, `warn` são todos do `Command` do Laravel.
+#
+# Sem `vendor/autoload.php` no repo, QUALQUER conclusão do phpstan que dependa
+# de resolver classe é não-confiável por construção. Não é conservadorismo:
+# é a FP-04 do findings-ground-truth.md ("filtrar no pipeline").
+# ---------------------------------------------------------------------------
+RUIDO_SEM_DEPENDENCIAS = (
+    re.compile(r"Call to an undefined method", re.I),
+    re.compile(r"Access to an undefined property", re.I),
+    re.compile(r"Call to (?:static )?method \S+ on an unknown class", re.I),
+    re.compile(r"Instantiated class \S+ not found", re.I),
+    re.compile(r"(?:Function|Class|Interface|Trait) \S+ not found", re.I),
+)
+
 # phpstan reporta MUITA coisa que não é débito priorizável (estilo, generics,
 # `iterable` sem tipo). Só estes padrões viram achado — mandato de corretude.
 PHPSTAN_ACIONAVEL = (
@@ -135,8 +172,11 @@ PHPSTAN_ACIONAVEL = (
      Category.MANUTENIBILIDADE, Severity.MEDIA, 1.0, "Variável possivelmente indefinida"),
     (re.compile(r"Call to an undefined method", re.I),
      Category.MANUTENIBILIDADE, Severity.ALTA, 2.0, "Chamada a método inexistente"),
-    (re.compile(r"(?:always (?:true|false)|will always evaluate)", re.I),
-     Category.MANUTENIBILIDADE, Severity.BAIXA, 1.0, "Condição com resultado constante"),
+    # "Comparison always true" saiu do mandato. No alvo ele só apontava
+    # `if ($month >= 1 && $month <= 3) ... elseif ($month >= 4 ...)`: numa
+    # cadeia de faixas, o limite inferior é redundante para o phpstan mas é o
+    # que torna o código legível. Reportar isso como débito é o FP-05 do
+    # ground truth — ruído de ferramenta elevado a achado.
     (re.compile(r"Unreachable statement", re.I),
      Category.MANUTENIBILIDADE, Severity.BAIXA, 0.5, "Código inalcançável"),
     (re.compile(r"returns? .* but return statement is missing", re.I),
@@ -201,6 +241,13 @@ _INTERPOLACAO = re.compile(r"\{\$[^{}]+\}|\$\w+(?:->\w+|\[[^\]]*\])*")
 _SUPERGLOBAIS = re.compile(r"\$_(?:GET|POST|REQUEST|COOKIE|FILES|SERVER)\b")
 
 # `$x = $r->get(...)` / `->input(` / `->query(` / `->all(` / `request(`
+# `protected $table = 'customers';` — propriedade de valor constante. Interpolar
+# isso em SQL não é injeção: o domínio é fechado, igual ao dict de chaves
+# literais do repo Python (FP-03 do ground truth).
+_PROPRIEDADE_LITERAL = re.compile(
+    r"(?:private|protected|public|var|static)\s+\$(\w+)\s*=\s*['\"][^'\"]*['\"]\s*;"
+)
+
 _ATRIBUICAO_DE_REQUEST = re.compile(
     r"\$(\w+)\s*=\s*[^;\n]*?(?:"
     r"\$\w+\s*->\s*(?:get|input|query|post|all|json|header|cookie|only|except)\s*\("
@@ -302,14 +349,23 @@ class _IndiceDeOrigem:
 
     def __init__(self, source: str) -> None:
         self.tainted: set[str] = set(_ATRIBUICAO_DE_REQUEST.findall(source))
+        # Propriedades com valor literal: `protected $table = 'customers';`.
+        # Domínio fechado — interpolar isso em SQL não é injetável.
+        self.literais: set[str] = set(_PROPRIEDADE_LITERAL.findall(source))
 
     def classificar(self, expr: str) -> str:
         """
         Classifica UMA expressão interpolada.
 
-            tainted  -> vem do request                    => Confidence.ALTA
-            internal -> parâmetro, $this->x, valor do banco => Confidence.MEDIA
+            tainted  -> vem do request                      => Confidence.ALTA
+            internal -> parâmetro, $this->x, valor do banco  => Confidence.MEDIA
+            literal  -> propriedade com valor constante      => não é achado
         """
+        # Literal primeiro: `{$this->table}` não pode ser "tainted" por uma
+        # variável local homônima, e a checagem de nome abaixo casaria `table`.
+        prop = re.fullmatch(r"\{?\s*\$this\s*->\s*(\w+)\s*\}?", expr)
+        if prop and prop.group(1) in self.literais:
+            return "literal"
         if _SUPERGLOBAIS.search(expr):
             return "tainted"
         # `{$r->get('month')}` interpolado direto, sem variável intermediária.
@@ -321,10 +377,20 @@ class _IndiceDeOrigem:
         return "internal"
 
     def classificar_conjunto(self, exprs: list[str]) -> tuple[str, str]:
-        """Precedência: basta UMA expressão atacável para o SQL ser atacável."""
-        for expr in exprs:
-            if self.classificar(expr) == "tainted":
+        """
+        Precedência: tainted > internal > literal.
+
+        Basta UMA expressão atacável para o SQL ser atacável. O inverso também
+        vale: só quando TODAS são literais o SQL deixa de ser injetável — é o
+        equivalente PHP do `TABLE_MAP` em f-string do repo Python (FP-03), e a
+        mesma decisão que a análise de AST do detector Python já toma.
+        """
+        classificacoes = [self.classificar(e) for e in exprs]
+        for expr, kind in zip(exprs, classificacoes):
+            if kind == "tainted":
                 return "tainted", f"`{expr}` vem de `request`"
+        if classificacoes and all(k == "literal" for k in classificacoes):
+            return "literal", "todos os valores são propriedades constantes — domínio fechado"
         return "internal", "valores internos (parâmetro, `$this` ou vindo do banco)"
 
 
@@ -342,6 +408,12 @@ def scan_sql_injection(repo: str) -> list[Finding]:
         index = _IndiceDeOrigem(source)
         for linha, tipo, exprs in _sql_interpolado(source):
             origem, detalhe = index.classificar_conjunto(exprs)
+            if origem == "literal":
+                # Domínio fechado: não é injetável. Descartar (e não rebaixar a
+                # confiança) é deliberado — um não-problema sobrevive no
+                # relatório mesmo com confiança Baixa, porque a severidade-base
+                # de SQLi é Crítica e o scoring ainda o deixa em Alta.
+                continue
             confianca = Confidence.ALTA if origem == "tainted" else Confidence.MEDIA
             achados.append(Finding(
                 rule_id="builtin:PHP-SQLI-INTERP",
@@ -431,8 +503,14 @@ def scan_xss_blade(repo: str) -> list[Finding]:
 _NOME_DE_SEGREDO = re.compile(
     r"(?:api)?(?:_|\b)(?:token|secret|password|passwd|pwd|apikey|api_key|"
     r"access_key|private_key|auth|credential|webhook)s?\b|"
+    # `id` NÃO entra como terminador: fazia `$pushAppId` (App ID do OneSignal)
+    # virar "credencial". App ID é identificador PÚBLICO por design — vai
+    # embarcado no SDK do cliente. Marcá-lo sob o Q4 ("credenciais e API keys
+    # fora do código-fonte") afirma vazamento onde não há, e o bandit, do lado
+    # Python, corretamente não o reporta. Nenhum segredo real dos dois repos
+    # depende desse terminador.
     r"(?:sms|push|erp|crm|slack|smtp|mail|accounting)\w*"
-    r"(?:key|token|secret|id|pass|webhook|hook)",
+    r"(?:key|token|secret|pass|webhook|hook)",
     re.I,
 )
 # Atribuição a propriedade/variável: `private $smsApiKey = 'VALOR';`
@@ -510,49 +588,22 @@ def scan_segredos(repo: str) -> list[Finding]:
     return achados
 
 
-def scan_debug(repo: str) -> list[Finding]:
-    """
-    DT-05, com ressalva — ver ITENS_NAO_ASSEGURADOS.
-
-    Emite achado para `APP_DEBUG=true` no `.env.example`, mas NÃO marca item de
-    questionário: o template não é a configuração de produção. O `.env` real
-    não está no repo (e é certo que não esteja).
-    """
-    regra = DEBITOS["DT-05"]
-    achados = []
-    for nome in sorted(os.listdir(repo)) if os.path.isdir(repo) else []:
-        if not nome.startswith(".env"):
-            continue
-        source = ler(repo, nome)
-        for i, linha in enumerate(source.splitlines(), start=1):
-            if re.match(r"\s*APP_DEBUG\s*=\s*true\s*$", linha, re.I):
-                achados.append(Finding(
-                    rule_id="builtin:PHP-DEBUG-TEMPLATE",
-                    source="builtin",
-                    language=Language.PHP,
-                    category=regra["category"],
-                    title=regra["title"],
-                    description=(
-                        f"`{nome}` traz `APP_DEBUG=true`. É o template que o time "
-                        f"copia para `.env` — e o deploy é `git pull` sem staging, "
-                        f"então o default vira produção com facilidade. Debug ligado "
-                        f"expõe stack trace com query e dado de cliente. "
-                        f"NÃO é prova de que a produção está com debug ligado: "
-                        f"`config/app.php` usa `env('APP_DEBUG', false)`, que é o "
-                        f"default correto. Por isso o item Q6 do questionário fica "
-                        f"como *sem cobertura*, não como falha."
-                    ),
-                    file=nome,
-                    line=i,
-                    evidence=linha.strip(),
-                    severity=regra["severity"],
-                    confidence=Confidence.MEDIA,
-                    effort_points=regra["effort"],
-                    questionnaire_item=None,   # deliberado
-                    cwe=regra["cwe"],
-                    debt_id="DT-05",
-                ))
-    return achados
+# -----------------------------------------------------------------------------
+# DT-05 (debug em produção) NÃO tem detector aqui — e a ausência é deliberada.
+#
+# Existia um `scan_debug` que reportava `APP_DEBUG=true` no `.env.example`.
+# Auditado contra o alvo, era FALSO POSITIVO: aquele arquivo é o skeleton do
+# Laravel sem nenhuma modificação (`APP_NAME=Laravel`, `APP_KEY=` vazio,
+# `APP_ENV=local`). `APP_DEBUG=true` num `.env.example` é o default do próprio
+# framework e está CORRETO — o arquivo existe para desenvolvimento local.
+# Reportá-lo marcaria como dívida todo projeto Laravel que existe.
+#
+# A pergunta real do questionário (Q6) é sobre a configuração de PRODUÇÃO, que
+# não está no repositório — e é certo que não esteja. `config/app.php` usa
+# `env('APP_DEBUG', false)`, o default seguro. Por isso Q6 aparece no scorecard
+# como "sem cobertura": ninguém verificou a produção, e admitir isso é mais
+# honesto que inventar evidência a partir de um template.
+# -----------------------------------------------------------------------------
 
 
 def scan_rotas_sem_auth(repo: str) -> list[Finding]:
@@ -660,6 +711,78 @@ def scan_log_sensivel(repo: str) -> list[Finding]:
     return achados
 
 
+# Arquivos `.env` que são TEMPLATE e devem estar no repositório. Versionar
+# `.env.example` é a prática correta do Laravel, não dívida.
+_ENV_TEMPLATE = re.compile(r"\.(example|sample|dist|template|test)$", re.I)
+# Chaves cujo valor preenchido indica credencial de verdade, não placeholder.
+_ENV_CHAVE_SENSIVEL = re.compile(
+    r"^(?:APP_KEY|DB_PASSWORD|DB_USERNAME|MAIL_PASSWORD|REDIS_PASSWORD|"
+    r"AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)|\w*(?:TOKEN|SECRET|API_KEY|PASSWORD))$",
+    re.I,
+)
+
+
+def verificar_env_commitado(repo: str) -> tuple[list[Finding], str]:
+    """
+    Q5 — "o repositório não contém `.env` com valores reais commitado?"
+
+    Este scanner existe porque a resposta estava sendo AFIRMADA sem verificação.
+    O detector declarava Q5 como coberto apoiado num comentário ("não há `.env`
+    real no repo, só `.env.example`"), e o scorecard imprimia "conforme" —
+    exatamente o erro do comercial da HourTrack, que respondeu "Sim" para tudo
+    sem a área técnica ter olhado. Observação de quem escreveu o detector não é
+    verificação do pipeline.
+
+    Distingue template de arquivo real: `.env.example` DEVE estar versionado
+    (é a prática do Laravel). O que é dívida é um `.env` com valor preenchido.
+
+    Devolve (achados, veredito) para o chamador declarar cobertura só quando a
+    varredura realmente rodou.
+    """
+    achados: list[Finding] = []
+    examinados: list[str] = []
+    for rel in listar_arquivos(repo, (".env",)) + [
+        n for n in (sorted(os.listdir(repo)) if os.path.isdir(repo) else [])
+        if n.startswith(".env") and os.path.isfile(os.path.join(repo, n))
+    ]:
+        nome = os.path.basename(rel)
+        if not nome.startswith(".env") or _ENV_TEMPLATE.search(nome):
+            continue
+        if rel in examinados:
+            continue
+        examinados.append(rel)
+        for i, linha in enumerate(ler(repo, rel).splitlines(), start=1):
+            if "=" not in linha or linha.lstrip().startswith("#"):
+                continue
+            chave, _, valor = linha.partition("=")
+            chave, valor = chave.strip(), valor.strip().strip("'\"")
+            if not valor or not _ENV_CHAVE_SENSIVEL.match(chave):
+                continue
+            achados.append(Finding(
+                rule_id="builtin:PHP-ENV-COMMITADO",
+                source="builtin",
+                language=Language.PHP,
+                category=Category.SEGURANCA,
+                title="Arquivo de ambiente com valor real versionado",
+                description=(
+                    f"`{rel}` não é template e traz `{chave}` preenchido. "
+                    f"Credencial de ambiente no Git fica no histórico mesmo "
+                    f"depois de removida — a correção exige rotacionar."
+                ),
+                file=rel, line=i, evidence=f"{chave}=<omitido>",
+                severity=Severity.ALTA, confidence=Confidence.ALTA,
+                effort_points=2.0, questionnaire_item="Q5", cwe=798,
+            ))
+
+    if achados:
+        veredito = f"{len(achados)} valor(es) real(is) em {', '.join(examinados)}"
+    elif examinados:
+        veredito = f"{', '.join(examinados)} sem valor sensível preenchido"
+    else:
+        veredito = "nenhum `.env` versionado (só template) — Q5 conforme"
+    return achados, veredito
+
+
 def verificar_hash_de_senha(repo: str) -> tuple[list[Finding], str]:
     """
     Q3/Q7 — e aqui a resposta honesta é diferente da do repo Python.
@@ -724,21 +847,37 @@ def _alvo(repo: str) -> str:
     return app if os.path.isdir(app) else repo
 
 
-def normalize_phpstan(payload: dict, repo: str) -> tuple[list[Finding], int, int]:
+def dependencias_instaladas(repo: str) -> bool:
+    """
+    As dependências do Composer estão no repo? (`vendor/autoload.php`)
+
+    Sem elas o phpstan não resolve nenhuma classe do framework, e metade do
+    que ele reporta vira consequência disso — não débito do time.
+    """
+    return os.path.isfile(os.path.join(repo, "vendor", "autoload.php"))
+
+
+def normalize_phpstan(
+    payload: dict, repo: str, deps_instaladas: bool = True
+) -> tuple[list[Finding], int, int]:
     """
     Converte o JSON do phpstan em Findings. Função pura: não invoca subprocess.
 
     Separada de `run_phpstan` pelo mesmo motivo das `normalize_*` do detector
     Python: dá para testar o filtro de ruído e o mandato sem ter phpstan
     instalado. Devolve (achados, descartados_por_ruido, descartados_fora_do_mandato).
+
+    `deps_instaladas=False` liga o filtro de ruído de segunda ordem — ver
+    `RUIDO_SEM_DEPENDENCIAS`.
     """
+    filtros = RUIDO_PHPSTAN if deps_instaladas else RUIDO_PHPSTAN + RUIDO_SEM_DEPENDENCIAS
     findings: list[Finding] = []
     ruido = fora_do_mandato = 0
     for caminho, bloco in sorted((payload.get("files") or {}).items()):
         rel = rel_path(caminho, repo)
         for msg in bloco.get("messages", []):
             texto = (msg.get("message") or "").strip()
-            if any(p.search(texto) for p in RUIDO_PHPSTAN):
+            if any(p.search(texto) for p in filtros):
                 ruido += 1
                 continue
             regra = next((r for r in PHPSTAN_ACIONAVEL if r[0].search(texto)), None)
@@ -779,12 +918,20 @@ def run_phpstan(repo: str) -> tuple[list[Finding], ToolRun]:
     if out is None:
         return [], ToolRun("phpstan", available=True, ok=False, error="stdout não é JSON")
 
-    findings, ruido, fora = normalize_phpstan(out, repo)
+    deps = dependencias_instaladas(repo)
+    findings, ruido, fora = normalize_phpstan(out, repo, deps_instaladas=deps)
     status = ToolRun("phpstan", available=True, ok=True, findings=len(findings))
     status.notes.append(
-        f"{ruido} mensagens de framework ausente filtradas (FP-04 do ground truth); "
+        f"{ruido} mensagens filtradas como ruído de ambiente (FP-04); "
         f"{fora} fora do mandato de corretude"
     )
+    if not deps:
+        status.notes.append(
+            "sem `vendor/` no repo: o phpstan não resolve classe do framework, "
+            "então conclusões que dependem disso (método/propriedade "
+            "inexistente) foram descartadas — seriam falso positivo. "
+            "Rode `composer install` no alvo para o phpstan render de verdade."
+        )
     return findings, status
 
 
@@ -826,7 +973,13 @@ def normalize_phpmetrics(payload, repo: str) -> list[Finding]:
         # rel_path (ele resolveria contra o cwd e produziria `../../...`).
         bruto = info.get("file")
         rel = rel_path(str(bruto), repo) if bruto else _classe_para_arquivo(nome)
-        linha = int(info.get("line", 0) or 0) or 1
+        linha = int(info.get("line", 0) or 0) or _linha_da_classe(repo, rel, nome)
+        # Nomes dos métodos: o phpmetrics os fornece, e sem eles o leitor tem a
+        # classe mas não sabe onde olhar dentro dela.
+        metodos = sorted(
+            m.get("name", "") for m in (info.get("methods") or [])
+            if isinstance(m, dict) and m.get("name")
+        )
         findings.append(Finding(
             rule_id="phpmetrics:CCN",
             source="phpmetrics",
@@ -848,9 +1001,39 @@ def normalize_phpmetrics(payload, repo: str) -> list[Finding]:
             effort_points=esforco,
             mitigates_bus_factor=True,
             debt_id=debt_id,
-            metrics={"cc": cc, "symbol": nome, "granularidade": "classe"},
+            metrics={
+                "cc": cc, "symbol": nome, "granularidade": "classe",
+                "cc_metodo_max": info.get("ccnMethodMax"),
+                "metodos": metodos,
+            },
         ))
     return findings
+
+
+def _linha_da_classe(repo: str, rel: str, fqcn: str) -> int:
+    """
+    Localiza a declaração `class <Nome>` no arquivo.
+
+    O phpmetrics NÃO emite linha em lugar nenhum: `file` vem `None` e a lista
+    `methods` traz só nomes. Sem esta busca, todo achado de complexidade caía
+    no default da linha 1 e a evidência virava `<?php` — um achado verdadeiro
+    que ninguém consegue acionar. O radon, do lado Python, entrega a linha da
+    função; isto aproxima o PHP desse padrão.
+
+    Devolve 1 se não encontrar — a linha errada é ruim, mas quebrar o achado
+    inteiro por causa da evidência seria pior.
+    """
+    nome = fqcn.replace("/", "\\").split("\\")[-1]
+    if not nome:
+        return 1
+    source = ler(repo, rel)
+    if not source:
+        return 1
+    m = re.search(
+        rf"^[ \t]*(?:final\s+|abstract\s+|readonly\s+)*class\s+{re.escape(nome)}\b",
+        source, re.M,
+    )
+    return numero_da_linha(source, m.start()) if m else 1
 
 
 def _classe_para_arquivo(fqcn: str) -> str:
@@ -1048,11 +1231,12 @@ def analyze(repo: str, use_semgrep: bool = True) -> tuple[list[Finding], list[To
     builtin += scan_sql_injection(repo)
     builtin += scan_xss_blade(repo)
     builtin += scan_segredos(repo)
-    builtin += scan_debug(repo)
     builtin += scan_rotas_sem_auth(repo)
     builtin += scan_log_sensivel(repo)
     hash_findings, veredito_hash = verificar_hash_de_senha(repo)
     builtin += hash_findings
+    env_findings, veredito_env = verificar_env_commitado(repo)
+    builtin += env_findings
 
     findings.extend(builtin)
     status_builtin = ToolRun("builtin:php", available=True, ok=True, findings=len(builtin))
@@ -1061,6 +1245,7 @@ def analyze(repo: str, use_semgrep: bool = True) -> tuple[list[Finding], list[To
         "não fazem (Q1, Q2, Q4, 1.1)"
     )
     status_builtin.notes.append(f"hash de senha: {veredito_hash}")
+    status_builtin.notes.append(f"`.env` versionado: {veredito_env}")
     runs.append(status_builtin)
 
     # --- ferramentas externas: toleram ausência ---
@@ -1089,8 +1274,13 @@ def cobertura_questionario(ferramentas_ok: set[str] | None = None) -> set[str]:
     Aqui quem cobre quase tudo é o `builtin:php`, não as ferramentas externas:
     nenhuma das três ferramentas PHP deste ambiente faz análise de segurança.
 
-        Q1 SQLi · Q2 XSS · Q3/Q7 hash · Q4 segredos · 1.1 autenticação
-        Q5 -> ver FP-02: não há `.env` real no repo; só `.env.example`.
+    Cada item aqui tem um scanner que REALMENTE roda — nenhum é afirmado a
+    partir de observação de quem escreveu o detector:
+
+        Q1  scan_sql_injection      Q2  scan_xss_blade
+        Q3  verificar_hash_de_senha Q4  scan_segredos
+        Q5  verificar_env_commitado Q7  verificar_hash_de_senha
+        1.1 scan_rotas_sem_auth
         Q6 -> nunca declarado; ver ITENS_NAO_ASSEGURADOS.
     """
     if ferramentas_ok is not None and "builtin:php" not in ferramentas_ok:

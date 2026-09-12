@@ -239,9 +239,17 @@ class IntegracaoNoRepoAlvo(unittest.TestCase):
                 f = self.por_local[("bandit:B608", arquivo, linha)]
                 self.assertEqual(f.confidence, Confidence.ALTA)
 
-    def test_falso_positivo_do_table_map_fica_com_confianca_baixa(self):
-        f = self.por_local[("bandit:B608", "app/everything.py", 205)]
-        self.assertEqual(f.confidence, Confidence.BAIXA)
+    def test_falso_positivo_do_table_map_nao_e_reportado(self):
+        """
+        FP-03 do ground truth, plantado de propósito: `DELETE FROM
+        {TABLE_MAP[thing]}` tem domínio fechado (4 chaves constantes, qualquer
+        outra dá KeyError) — não é injetável.
+
+        Descartado em vez de rebaixado: com severidade-base Crítica, mesmo
+        Confidence.BAIXA sai do scoring em prioridade Alta, e um não-problema
+        ficaria no relatório acima de dívidas reais.
+        """
+        self.assertNotIn(("bandit:B608", "app/everything.py", 205), self.por_local)
 
     def test_sqli_de_origem_interna_nao_vira_confianca_alta(self):
         for arquivo, linha in [("app/models/customer.py", 38),

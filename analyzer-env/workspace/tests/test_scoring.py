@@ -185,6 +185,32 @@ def test_horizonte_furacao_seguranca_critica_nao_bloqueadora():
     assert scoring.score_one(md5, ctx).horizon is scoring.Horizon.FURACAO
 
 
+def test_horizonte_seguranca_do_questionario_cabe_nos_30_dias():
+    """Segurança que o CLIENTE pergunta no questionário entra na janela da auditoria (≤30d).
+
+    Credencial hardcoded é Q4 (o cliente pergunta) mas a prioridade calculada é só
+    Alta. Antes caía em 4–8 semanas — FORA dos 30 dias da auditoria, o que faria o
+    relatório prometer ao cliente remediar só depois da avaliação dele. Agora vai pro
+    Furacão (15–30d), dentro da janela.
+    """
+    ctx = scoring.ScoringContext()
+    credencial = mk(category=Category.SEGURANCA, severity=Severity.ALTA,
+                    confidence=Confidence.MEDIA, questionnaire_item="Q4", effort_points=2.0)
+    assert scoring.score_one(credencial, ctx).priority is scoring.Priority.ALTA
+    assert scoring.score_one(credencial, ctx).horizon is scoring.Horizon.FURACAO
+
+
+def test_alta_sem_questionario_continua_em_4_8_semanas():
+    """GUARDA: a regra acima é SÓ pra segurança que o cliente pergunta — não puxa tudo.
+
+    Uma Alta de manutenibilidade (sem item de questionário) segue em 4–8 semanas.
+    """
+    ctx = scoring.ScoringContext()
+    alta_manut = mk(category=Category.MANUTENIBILIDADE, severity=Severity.ALTA,
+                    confidence=Confidence.ALTA)
+    assert scoring.score_one(alta_manut, ctx).horizon is scoring.Horizon.CURTO_PRAZO
+
+
 def test_horizonte_curto_prazo_critico_caro_alta_e_bus_factor():
     """4–8 semanas: crítico caro demais pro furacão, Alta, e mitigadores da saída do dev."""
     critico_caro = mk(category=Category.SEGURANCA, severity=Severity.CRITICA,

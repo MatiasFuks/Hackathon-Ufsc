@@ -328,6 +328,30 @@ _CURTO = scoring.Horizon.CURTO_PRAZO.value
 _BACKLOG = scoring.Horizon.BACKLOG.value
 
 
+def capacidade_das_janelas(
+    custos: dict[str, dict[str, float]], ctx: scoring.ScoringContext
+) -> dict[str, dict[str, float]]:
+    """
+    A segurança que o cliente pergunta cabe nos prazos dele?
+
+    Release (0–14d) e Furacão (15–30d) são o que precisa estar pronto até a
+    auditoria. Soma o esforço de cada prazo e compara com a capacidade do time
+    até lá (SP_POR_SEMANA). Não esconde estouro: se não cabe, diz em quantos SP
+    passou — é o número que força a conversa de descopar, reforçar ou planejar.
+    """
+    def janela(sp: float, dias: int) -> dict[str, float]:
+        cap = round(SP_POR_SEMANA * dias / 7, 1)
+        return {"dias": dias, "sp": round(sp, 1), "capacidade": cap,
+                "cabe": sp <= cap, "estouro": round(max(0.0, sp - cap), 1)}
+
+    sp_release = custos[_RELEASE]["story_points"]
+    sp_auditoria = sp_release + custos[_FURACAO]["story_points"]
+    return {
+        "release": janela(sp_release, ctx.days_until_release),
+        "auditoria": janela(sp_auditoria, ctx.days_until_audit),
+    }
+
+
 def narrativa_estatica(
     scored: list[scoring.ScoredFinding], itens_cobertos: set[str]
 ) -> dict[str, Any]:
@@ -477,6 +501,7 @@ def render_markdown(
     ai_status: str = "narrativa estática",
     ctx: scoring.ScoringContext | None = None,
 ) -> str:
+    ctx = ctx or scoring.ScoringContext()
     scored = ordenar_por_score(findings, ctx)
     puros = [sf.finding for sf in scored]
     sumario = resumo(puros)
@@ -590,6 +615,23 @@ def render_markdown(
         "partir da prioridade, do esforço e das pressões de prazo da empresa. "
         "Nenhuma dessas janelas foi escolhida à mão.")
     add("")
+
+    # ------------------------------------------ a conta fecha nos prazos?
+    cap = capacidade_das_janelas(custos, ctx)
+    add("**A segurança que o cliente pede cabe nos prazos?**")
+    add("")
+    for nome, d in (("Release", cap["release"]), ("Até a auditoria", cap["auditoria"])):
+        veredito = "✅ cabe" if d["cabe"] else f"⚠️ estoura em {d['estouro']:g} SP"
+        add(f"- **{nome} ({d['dias']} dias):** {d['sp']:g} SP a fazer · "
+            f"capacidade ~{d['capacidade']:g} SP → {veredito}")
+    add("")
+    if not cap["auditoria"]["cabe"]:
+        d = cap["auditoria"]
+        add(f"> ⚠️ A segurança que o cliente pergunta soma {d['sp']:g} SP até a auditoria, mas a "
+            f"janela de {d['dias']} dias comporta ~{d['capacidade']:g} SP — estouro de "
+            f"{d['estouro']:g} SP. Fechar tudo exige **descopar a release, reforçar o time ou "
+            f"entregar parte como plano datado**: não dá para cumprir os dois prazos com 2 devs.")
+        add("")
 
     # ------------------------------------------------------------------ plano
     add("## Plano")

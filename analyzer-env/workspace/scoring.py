@@ -70,7 +70,8 @@ def _questionnaire_items(finding: Finding) -> set[str]:
     return {p.strip() for p in finding.questionnaire_item.split(",") if p.strip()}
 
 
-def horizon_for(finding: Finding, priority: Priority, is_blocker: bool) -> Horizon:
+def horizon_for(finding: Finding, priority: Priority, is_blocker: bool,
+                pergunta_do_cliente: bool = False) -> Horizon:
     """
     Mapeia o achado num dos 4 horizontes (slide s2c, com o Furacão dividido).
 
@@ -78,15 +79,24 @@ def horizon_for(finding: Finding, priority: Priority, is_blocker: bool) -> Horiz
        trava o contrato — começa no dia 1, na janela da release. O esforço grande
        já foi barrado antes pela penalidade ×0.5 (não cabe no congelamento).
     🌀 Furacão (15–30d): o resto da segurança crítica (ex.: MD5, SQLi de confiança
-       Média) — feito depois da release entregue, ainda antes da auditoria.
+       Média) E a segurança que o cliente pergunta no questionário (ex.: credencial
+       hardcoded) — tudo que precisa caber na janela da auditoria de 30 dias.
     🔧 4–8 semanas: Alta, críticos caros demais pra janela (precisam de plano) e
        mitigadores da saída do dev (testes/documentação).
     🚀 Backlog: o resto (Média/Baixa, performance, refatoração grande).
+
+    `pergunta_do_cliente`: o achado derruba um item do questionário com a auditoria
+    em ≤30 dias. Mesmo que a prioridade calculada seja só Alta, ele tem que caber na
+    janela da auditoria — senão o relatório prometeria ao cliente remediar um ponto
+    que ELE perguntou só depois da avaliação dele. Fica de fora apenas o que é caro
+    demais pra janela (> 5 SP), que vira "plano crível" em 4–8 semanas.
     """
     if is_blocker:
         return Horizon.RELEASE
     if priority is Priority.CRITICA:
         return Horizon.FURACAO if finding.effort_points <= 5 else Horizon.CURTO_PRAZO
+    if pergunta_do_cliente and finding.effort_points <= 5:
+        return Horizon.FURACAO
     if priority is Priority.ALTA or finding.mitigates_bus_factor:
         return Horizon.CURTO_PRAZO
     return Horizon.BACKLOG
@@ -188,7 +198,19 @@ def score_one(finding: Finding, ctx: ScoringContext) -> ScoredFinding:
         priority = Priority.CRITICA
         breakdown.append(f"override: bloqueador de contrato ({','.join(sorted(bloqueantes))}) → Crítica")
 
-    horizon = horizon_for(finding, priority, is_blocker)
+    # Segurança que o cliente pergunta no questionário, com a auditoria em ≤30 dias,
+    # precisa caber na janela da auditoria (ver horizon_for). Não muda o score nem a
+    # prioridade — só impede que um item perguntado pelo cliente escorregue pra 4–8
+    # semanas, fora dos 30 dias.
+    pergunta_do_cliente = (
+        finding.category is Category.SEGURANCA
+        and bool(_questionnaire_items(finding))
+        and ctx.days_until_audit <= 30
+    )
+
+    horizon = horizon_for(finding, priority, is_blocker, pergunta_do_cliente)
+    if pergunta_do_cliente and not is_blocker and horizon is Horizon.FURACAO and priority is not Priority.CRITICA:
+        breakdown.append("item do questionário do cliente → cabe na janela da auditoria (≤30d)")
     breakdown.append(f"horizonte: {horizon.value}")
 
     return ScoredFinding(finding=finding, score=score, priority=priority,

@@ -156,6 +156,14 @@ class Degradacao(unittest.TestCase):
         self.assertIn(scoring.Horizon.RELEASE.value, md)
         self.assertIn(scoring.Horizon.FURACAO.value, md)
 
+    def test_relatorio_mostra_checagem_de_capacidade(self):
+        """O relatório diz se a segurança pedida cabe na capacidade do time até os prazos."""
+        md = report.render_markdown(
+            [mk()], {"name": "x", "languages": ["python"]}, [], {"Q4"},
+        )
+        self.assertIn("cabe nos prazos", md)
+        self.assertIn("Até a auditoria", md)
+
 
 class ValidacaoDaResposta(unittest.TestCase):
     def test_resposta_incompleta_e_descartada(self):

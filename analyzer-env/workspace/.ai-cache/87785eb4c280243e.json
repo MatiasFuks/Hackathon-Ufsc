@@ -1,0 +1,68 @@
+{
+  "nao_vamos_fazer": [
+    "Refatorar a complexidade de rotinas secundárias — demanda esforço incompatível com a urgência do contrato atual.",
+    "Criar nova cobertura de testes automatizados — o prazo restrito e a capacidade limitada do time exigem foco exclusivo nas correções bloqueantes."
+  ],
+  "plano_backlog": [
+    "Revisar o template de ambiente para desativar o modo de depuração.",
+    "Corrigir chamadas a métodos inexistentes na rotina de sincronização de dados.",
+    "Ajustar condições redundantes e resultados constantes nos seletores de data."
+  ],
+  "plano_curto_prazo": [
+    "Bloquear o acesso sem autenticação nas rotas que expõem dados sensíveis.",
+    "Simplificar trechos de código com alta complexidade lógica para facilitar a manutenção futura.",
+    "Organizar a documentação dos processos atuais para mitigar a saída do desenvolvedor principal."
+  ],
+  "plano_furacao": [
+    "Corrigir todas as falhas de consulta ao banco de dados listadas nos relatórios de segurança.",
+    "Remover imediatamente todas as credenciais e chaves de acesso gravadas dentro do código-fonte.",
+    "Ajustar a exibição de dados nos templates para impedir problemas de visualização de conteúdo.",
+    "Retirar dados sensíveis dos arquivos de registro do sistema.",
+    "Garantir a resposta positiva aos itens bloqueantes do questionário do cliente enterprise."
+  ],
+  "recomendacao": "Como responsável técnico pela operação, meu foco absoluto seria eliminar todas as falhas de segurança que impedem a aprovação no questionário do cliente enterprise nos primeiros trinta dias. Deixaria para depois qualquer melhoria de organização interna de código ou limpeza de rotinas secundárias que não afetem a segurança imediata. Essa escolha protege a receita da empresa, garante a conformidade com o cliente que vai dobrar o faturamento e evita processos judiciais decorrentes de vazamentos. O time precisa canalizar toda a capacidade restante para cumprir essas correções antes da saída do desenvolvedor principal.",
+  "resumo_executivo": "A análise identificou falhas graves de segurança e organização no sistema que ameaçam diretamente a assinatura de contratos importantes e a segurança dos dados. O principal problema envolve brechas que permitem invasões ao banco de dados e exposição de informações, além de senhas e acessos gravados incorretos no código. Resolver isso é urgente para evitar o bloqueio de um novo cliente de grande porte e o risco de processos judiciais. O time precisa focar imediatamente nas correções de segurança antes de qualquer outra entrega.",
+  "riscos": [
+    {
+      "consequencia": "Alguém mal-intencionado pode extrair, apagar ou corromper todos os dados de contratos e horas das 47 agências.",
+      "debitos": [
+        "DT-01"
+      ],
+      "o_que_e": "Existem falhas que permitem a inserção de comandos maliciosos diretamente nas consultas ao banco de dados da aplicação.",
+      "titulo": "Invasão e roubo de dados do banco"
+    },
+    {
+      "consequencia": "Qualquer pessoa com acesso mínimo ao repositório consegue roubar essas credenciais e invadir sistemas integrados.",
+      "debitos": [
+        "DT-04"
+      ],
+      "o_que_e": "Chaves de acesso e senhas de serviços externos estão escritas diretamente dentro dos arquivos de código da aplicação.",
+      "titulo": "Credenciais e senhas expostas"
+    },
+    {
+      "consequencia": "Páginas maliciosas podem ser usadas para roubar sessões e dados de acesso dos usuários corporativos.",
+      "debitos": [
+        "DT-02"
+      ],
+      "o_que_e": "O sistema mostra informações na tela sem fazer a limpeza adequada dos dados fornecidos pelos usuários.",
+      "titulo": "Exibição insegura de dados na tela"
+    },
+    {
+      "consequencia": "Informações privadas de clientes ficam expostas em arquivos de texto acessíveis no servidor.",
+      "debitos": [
+        "DT-08"
+      ],
+      "o_que_e": "O sistema está salvando dados confidenciais de acesso e uso em arquivos de texto de auditoria e monitoramento.",
+      "titulo": "Gravação de informações sensíveis em arquivos de registro"
+    },
+    {
+      "consequencia": "Qualquer pessoa com o link correto pode visualizar dados restritos sem autenticação.",
+      "debitos": [
+        "DT-06"
+      ],
+      "o_que_e": "Determinados endereços da aplicação permitem o acesso a dados de clientes sem exigir que o usuário faça login.",
+      "titulo": "Páginas sem exigência de identificação"
+    }
+  ],
+  "situacao_do_contrato": "O questionário de segurança do cliente enterprise reprova o sistema nos itens Q1, Q2 e Q4 devido a falhas de invasão ao banco de dados, falhas de exibição de conteúdo e senhas expostas no código. Como a regra exige cem por cento de conformidade sem respostas negativas, a assinatura está totalmente bloqueada hoje. Perder esse negócio significa deixar de dobrar a receita recorrente mensal da empresa."
+}

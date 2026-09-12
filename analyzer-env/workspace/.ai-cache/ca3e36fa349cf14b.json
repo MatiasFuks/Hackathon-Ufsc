@@ -1,0 +1,70 @@
+{
+  "nao_vamos_fazer": [
+    "Refatoração de exceções genéricas — fica para o backlog estruturado, pois não bloqueia contratos atuais",
+    "Remoção de código morto — fica para o backlog estruturado, sem urgência para o negócio",
+    "Ajustes em chamadas HTTP sem timeout — fica para o backlog estruturado, pois tem impacto menor na operação imediata"
+  ],
+  "plano_backlog": [
+    "Tratar os pontos de captura genérica de exceções",
+    "Ajustar funções que retornam None implicitamente",
+    "Reduzir complexidade ciclomática em funções secundárias",
+    "Remover código morto e variáveis não usadas",
+    "Adicionar timeout em chamadas HTTP",
+    "Resolver TODOs e FIXMEs pendentes"
+  ],
+  "plano_curto_prazo": [
+    "Remover todas as credenciais hardcoded do código-fonte e migrar para variáveis de ambiente",
+    "Refatorar a complexidade ciclomática alta na função de tratamento de datas",
+    "Realizar transferência de conhecimento das partes críticas do sistema antes da saída do desenvolvedor principal"
+  ],
+  "plano_furacao": [
+    "Corrigir todas as falhas de interpolação em consultas ao banco de dados listadas no horizonte de 0 a 30 dias",
+    "Substituir o algoritmo de hash de senha quebrado por um padrão seguro",
+    "Responder aos itens bloqueantes do questionário de segurança da GlobalConsult"
+  ],
+  "recomendacao": "Se eu fosse o CTO por um dia, faria primeiro a correção das falhas de segurança críticas relacionadas ao banco de dados e ao armazenamento de senhas. Isso é inegociável porque destrava imediatamente o contrato de R$ 8.000 mensais com a GlobalConsult e protege a empresa contra processos judiciais por vazamento de dados. Em seguida, removeria as credenciais expostas no código para atender aos demais requisitos de segurança. Deixaria para depois toda a limpeza de código morto, tratamento de exceções genéricas e redução de complexidade que não afetam a segurança nem os prazos de entrega, garantindo que o time foque apenas no que blinda o faturamento e o contrato enterprise.",
+  "resumo_executivo": "A auditoria identificou falhas graves de segurança e qualidade no código que ameaçam diretamente os contratos e a expansão da HourTrack. Falhas em controles de acesso a banco de dados e proteção de senhas impedem a aprovação no questionário de segurança do cliente enterprise GlobalConsult. Sem a correção imediata desses pontos críticos, a empresa perderá a oportunidade de dobrar a receita recorrente e correrá risco de processos judiciais.",
+  "riscos": [
+    {
+      "consequencia": "Vazamento de dados confidenciais de contratos entre agências e clientes, resultando em processo judicial e cancelamento de contratos.",
+      "debitos": [
+        "DT-01"
+      ],
+      "o_que_e": "Existem falhas que permitem inserir comandos maliciosos diretamente nas consultas ao banco de dados por meio de dados fornecidos pelos usuários.",
+      "titulo": "Manipulação indevida de banco de dados"
+    },
+    {
+      "consequencia": "Contas de usuários podem ser invadidas facilmente, comprometendo a operação das agências clientes.",
+      "debitos": [
+        "DT-03"
+      ],
+      "o_que_e": "As senhas dos usuários são protegidas por um algoritmo de criptografia antigo e considerado quebrado pelo mercado.",
+      "titulo": "Armazenamento inseguro de senhas de usuários"
+    },
+    {
+      "consequencia": "Qualquer pessoa com acesso ao código consegue invadir sistemas externos integrados e comprometer a segurança da plataforma.",
+      "debitos": [
+        "DT-04"
+      ],
+      "o_que_e": "Chaves de acesso e senhas estão gravadas diretamente dentro dos arquivos de código da aplicação.",
+      "titulo": "Credenciais e senhas expostas no código-fonte"
+    },
+    {
+      "consequencia": "O time perde velocidade para entregar novas funcionalidades e corrigir erros urgentes, estourando prazos de entrega.",
+      "debitos": [
+        "DT-11"
+      ],
+      "o_que_e": "Existem trechos de código com lógica excessivamente complexa para tratar regras de datas, dificultando alterações rápidas.",
+      "titulo": "Código complexo e difícil de manter"
+    },
+    {
+      "consequencia": "Falhas silenciosas ocorrem na integração de dados e faturamento sem que a equipe perceba a origem do problema.",
+      "debitos": [
+        "DT-17"
+      ],
+      "o_que_e": "O sistema captura erros de forma genérica sem registrar os detalhes necessários para investigação.",
+      "titulo": "Tratamento inadequado de erros no sistema"
+    }
+  ],
+  "situacao_do_contrato": "O questionário de segurança exigido pela GlobalConsult possui itens bloqueantes que falham hoje, como a proteção contra manipulação maliciosa de banco de dados e o uso de algoritmos seguros para senhas. Como a seção exige 100% de conformidade e qualquer resposta negativa bloqueia a assinatura, o contrato de R$ 8.000 por mês está totalmente travado. Além disso, falhas em credenciais expostas no código também reprovam em itens avaliados."
+}

@@ -1,0 +1,55 @@
+{
+  "nao_vamos_fazer": [
+    "Cobertura total de testes — o esforço de 13 semanas é inviável para o tamanho atual do time",
+    "Ambiente de testes separado — o foco agora é a sobrevivência financeira e segurança básica",
+    "Monitoramento profissional — continuaremos dependendo do aviso dos clientes no curto prazo"
+  ],
+  "plano_backlog": [
+    "Criar um sistema de alertas para que o time saiba que o sistema caiu antes do cliente",
+    "Padronizar o tratamento de erros para evitar que o sistema trave sem explicação",
+    "Remover partes do código que não são mais utilizadas para facilitar a manutenção",
+    "Estabelecer limites de tempo em conexões externas para evitar lentidão"
+  ],
+  "plano_curto_prazo": [
+    "Remover senhas e chaves de acesso que estão gravadas abertamente no código",
+    "Realizar sessões de transferência de conhecimento com o desenvolvedor que está saindo",
+    "Simplificar a lógica de cálculo de datas para reduzir erros de faturamento",
+    "Implementar uma revisão básica de código entre os dois desenvolvedores restantes"
+  ],
+  "plano_furacao": [
+    "Corrigir os 6 pontos críticos que permitem comandos maliciosos no banco de dados",
+    "Substituir o método inseguro de proteção de senhas pelo padrão exigido pelo mercado",
+    "Focar os 6 pontos semanais do time exclusivamente na entrega da versão 2.1 em 14 dias",
+    "Preencher o questionário de segurança da GlobalConsult após as correções técnicas"
+  ],
+  "recomendacao": "Minha recomendação é priorizar a segurança e a retenção de receita nos próximos 30 dias. Primeiro, corrija as falhas que permitem invasão ao banco de dados para destravar o contrato da GlobalConsult. Em seguida, concentre o esforço total na entrega da versão 2.1 para evitar a perda dos clientes que representam 60% do faturamento. Deixe as melhorias de organização de código para depois que a sucessão do desenvolvedor principal estiver garantida. O foco deve ser estabilizar o negócio antes de tentar expandir a plataforma.",
+  "resumo_executivo": "Identificamos falhas críticas de segurança e uma dependência extrema de um desenvolvedor que deixará a empresa em 6 semanas. Estas vulnerabilidades bloqueiam o contrato da GlobalConsult e colocam em risco a operação das 47 agências atuais. Precisamos agir imediatamente para garantir a receita de R$ 8.000 mensais do novo cliente e evitar o cancelamento de contratos que somam 60% do faturamento.",
+  "riscos": [
+    {
+      "consequencia": "Vazamento de contratos sigilosos das agências e possíveis processos judiciais contra a HourTrack.",
+      "o_que_e": "Falhas técnicas permitem que pessoas mal-intencionadas executem comandos diretamente no seu banco de dados através dos campos de texto do sistema.",
+      "titulo": "Invasão do banco de dados"
+    },
+    {
+      "consequencia": "Interrupção total da capacidade de corrigir erros ou criar novas funções após a saída do colaborador.",
+      "o_que_e": "O profissional que escreveu 90% do sistema sairá em 6 semanas, levando consigo o conhecimento de como o software funciona.",
+      "titulo": "Saída do desenvolvedor principal"
+    },
+    {
+      "consequencia": "Cancelamento imediato dos três maiores clientes da base caso o prazo não seja cumprido.",
+      "o_que_e": "A versão 2.1 está prometida para daqui a 14 dias, mas o time só consegue entregar uma fração do trabalho necessário por semana.",
+      "titulo": "Perda de 60% da receita atual"
+    },
+    {
+      "consequencia": "Acesso não autorizado às contas das agências e exposição de dados de faturamento.",
+      "o_que_e": "O sistema utiliza um método ultrapassado e inseguro para esconder as senhas dos usuários, que pode ser facilmente quebrado.",
+      "titulo": "Senhas de usuários expostas"
+    },
+    {
+      "consequencia": "Aumento de reclamações e dependência dos clientes para descobrir que o sistema saiu do ar.",
+      "o_que_e": "Não existem processos automáticos para verificar se uma mudança nova quebra o que já estava funcionando.",
+      "titulo": "Instabilidade por falta de testes"
+    }
+  ],
+  "situacao_do_contrato": "O contrato com a GlobalConsult está travado porque o sistema falha em requisitos obrigatórios de proteção de dados. A presença de vulnerabilidades que permitem acesso indevido ao banco de dados impede a assinatura do acordo de R$ 8.000 por mês. Temos 30 dias para corrigir esses pontos e garantir a conformidade exigida pelo cliente enterprise."
+}

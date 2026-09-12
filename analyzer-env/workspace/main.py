@@ -24,6 +24,7 @@ import json
 import os
 import sys
 
+import ai
 import report
 import scoring
 from detectors.base import IGNORAR_DIRS
@@ -99,6 +100,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stamp", metavar="TEXTO",
                         help="inclui esta marca de geração no relatório; por padrão "
                              "a saída não tem data, para ser byte-idêntica entre execuções")
+    parser.add_argument("--no-ai", action="store_true",
+                        help="não chama o Gemini; usa a narrativa estática do report.py")
+    parser.add_argument("--ai-model", metavar="NOME",
+                        help=f"modelo Gemini (padrão: tenta {', '.join(ai.MODELOS)})")
+    parser.add_argument("--ai-cache", default=ai.CACHE_DIR_PADRAO, metavar="DIR",
+                        help=f"cache das respostas da IA (padrão: {ai.CACHE_DIR_PADRAO})")
     parser.add_argument("-q", "--quiet", action="store_true", help="não imprime resumo")
     args = parser.parse_args(argv)
 
@@ -126,15 +133,36 @@ def main(argv: list[str] | None = None) -> int:
     destino_json = os.path.join(args.output, "findings.json")
     destino_scoring = os.path.join(args.output, "scoring.json")
 
+    # Etapa de scoring: prioriza os achados (determinístico) e grava o artefato
+    # de handoff. O `report` consome Prioridade/Horizonte daqui importando o
+    # módulo `scoring` — não recalcula nada por conta própria.
+    ctx = scoring.ScoringContext()
+    scored_payload = scoring.build_scoring_payload(achados, ctx, meta)
+
+    # Narrativa de negócio pela IA, para o relatório executivo. O payload NÃO
+    # leva trecho de código: as linhas de evidência do alvo contêm credenciais
+    # hardcoded, e mandá-las para uma API de terceiro seria vazar o segredo do
+    # cliente enquanto escrevemos o relatório que o denuncia. Ver ai.py.
+    narrativa, ai_status = ai.gerar_narrativa(
+        ai.montar_payload(
+            scored_payload["findings"],
+            report.resumo(achados),
+            report.scorecard(achados, cobertos),
+            meta,
+        ),
+        cache_dir=args.ai_cache,
+        modelo=args.ai_model,
+        permitir_chamada=not args.no_ai,
+    )
+
     with open(destino_md, "w", encoding="utf-8") as fh:
-        fh.write(report.render_markdown(achados, meta, status, cobertos, stamp=args.stamp))
+        fh.write(report.render_markdown(
+            achados, meta, status, cobertos, stamp=args.stamp,
+            narrativa=narrativa, ai_status=ai_status, ctx=ctx,
+        ))
+    # findings.json e scoring.json nunca passam por IA.
     with open(destino_json, "w", encoding="utf-8") as fh:
         fh.write(report.render_json(achados, meta, status, cobertos, stamp=args.stamp))
-
-    # Etapa de scoring: prioriza os achados (determinístico) e grava o artefato
-    # de handoff. O report fica por conta de outra pessoa — ela lê a
-    # Prioridade/Horizonte daqui (ou importa `scoring`) sem o scoring tocar nele.
-    scored_payload = scoring.build_scoring_payload(achados, scoring.ScoringContext(), meta)
     if args.stamp:
         scored_payload["generated_at"] = args.stamp
     with open(destino_scoring, "w", encoding="utf-8") as fh:
@@ -153,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         bloqueantes = [q["item"] for q in falhas if q["bloqueante"]]
         print(f"questionário: {len(falhas)} de {len(report.QUESTIONARIO)} itens em falha"
               + (f" — BLOQUEANTES: {', '.join(bloqueantes)}" if bloqueantes else ""))
+        print(f"narrativa:    {ai_status}")
         print(f"saída:        {destino_md}")
         print(f"              {destino_json}")
         print(f"              {destino_scoring}  (scoring: {scored_payload['summary']['total']} achados priorizados)")

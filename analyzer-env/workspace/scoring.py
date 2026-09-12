@@ -195,3 +195,38 @@ def score_findings(findings: list[Finding], ctx: ScoringContext) -> list[ScoredF
     scored = [score_one(f, ctx) for f in findings]
     scored.sort(key=lambda sf: (-sf.score, sf.finding.uid))
     return scored
+
+
+def build_scoring_payload(findings: list[Finding], ctx: ScoringContext,
+                          repo: dict | None = None) -> dict:
+    """
+    Monta o payload serializável do scoring — o que o `main.py` grava em
+    `output/<linguagem>/scoring.json` como etapa do pipeline.
+
+    É o artefato de handoff: quem gera o relatório lê a Prioridade/Horizonte
+    daqui (ou importa este módulo), sem o scoring precisar tocar no `report.py`.
+    """
+    scored = score_findings(findings, ctx)
+
+    por_prioridade = {p.value: 0 for p in Priority}
+    por_horizonte = {h.value: 0 for h in Horizon}
+    for sf in scored:
+        por_prioridade[sf.priority.value] += 1
+        por_horizonte[sf.horizon.value] += 1
+
+    return {
+        "schema_version": 1,
+        "repo": repo or {},
+        "scoring_context": {
+            "days_until_release": ctx.days_until_release,
+            "days_until_audit": ctx.days_until_audit,
+            "enterprise_deal_active": ctx.enterprise_deal_active,
+            "blocking_items": sorted(ctx.blocking_items),
+        },
+        "summary": {
+            "total": len(scored),
+            "por_prioridade": por_prioridade,
+            "por_horizonte": por_horizonte,
+        },
+        "findings": [sf.to_dict() for sf in scored],
+    }

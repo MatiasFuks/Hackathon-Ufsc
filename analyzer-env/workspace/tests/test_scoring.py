@@ -275,3 +275,35 @@ def test_conjunto_bloqueante_nao_diverge_do_report():
     """GUARDA: a lista de itens bloqueantes do scoring tem que bater com a do report."""
     import report
     assert scoring.ScoringContext().blocking_items == report.ITENS_BLOQUEANTES
+
+
+def test_build_scoring_payload_resume_ordena_e_serializa():
+    """O payload de saída (que o main grava em output/<lang>/scoring.json) resume e ordena."""
+    ctx = scoring.ScoringContext()
+    findings = [
+        mk(category=Category.MANUTENIBILIDADE, severity=Severity.BAIXA,
+           confidence=Confidence.ALTA, debt_id="DT-28", file="b.py", line=2),
+        mk(category=Category.SEGURANCA, severity=Severity.CRITICA,
+           confidence=Confidence.ALTA, questionnaire_item="Q1", file="a.py", line=1),
+    ]
+    payload = scoring.build_scoring_payload(findings, ctx, {"name": "python", "languages": ["python"]})
+
+    assert payload["summary"]["total"] == 2
+    assert payload["summary"]["por_prioridade"]["Crítica"] == 1
+    assert "por_horizonte" in payload["summary"]
+    assert payload["repo"]["name"] == "python"
+    # findings ordenados por score desc (a SQLi bloqueadora vem antes do dead code)
+    scores = [f["score"] for f in payload["findings"]]
+    assert scores == sorted(scores, reverse=True)
+    # cada finding serializado carrega o resultado do scoring
+    assert "priority" in payload["findings"][0] and "horizon" in payload["findings"][0]
+
+
+def test_build_scoring_payload_e_deterministico():
+    """Mesma entrada → payload idêntico (o pipeline precisa ser 100% determinístico)."""
+    import json
+    ctx = scoring.ScoringContext()
+    findings = [mk(file="a.py", line=1), mk(severity=Severity.MEDIA, file="b.py", line=2)]
+    a = json.dumps(scoring.build_scoring_payload(findings, ctx), sort_keys=True, ensure_ascii=False)
+    b = json.dumps(scoring.build_scoring_payload(findings, ctx), sort_keys=True, ensure_ascii=False)
+    assert a == b

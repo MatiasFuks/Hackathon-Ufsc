@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import os
 import sys
 
 import report
+import scoring
 from models import Language, deduplicate
 
 # Diretórios que nunca entram na análise nem na detecção de linguagem.
@@ -125,11 +127,21 @@ def main(argv: list[str] | None = None) -> int:
     os.makedirs(args.output, exist_ok=True)
     destino_md = os.path.join(args.output, "relatorio.md")
     destino_json = os.path.join(args.output, "findings.json")
+    destino_scoring = os.path.join(args.output, "scoring.json")
 
     with open(destino_md, "w", encoding="utf-8") as fh:
         fh.write(report.render_markdown(achados, meta, status, cobertos, stamp=args.stamp))
     with open(destino_json, "w", encoding="utf-8") as fh:
         fh.write(report.render_json(achados, meta, status, cobertos, stamp=args.stamp))
+
+    # Etapa de scoring: prioriza os achados (determinístico) e grava o artefato
+    # de handoff. O report fica por conta de outra pessoa — ela lê a
+    # Prioridade/Horizonte daqui (ou importa `scoring`) sem o scoring tocar nele.
+    scored_payload = scoring.build_scoring_payload(achados, scoring.ScoringContext(), meta)
+    if args.stamp:
+        scored_payload["generated_at"] = args.stamp
+    with open(destino_scoring, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(scored_payload, indent=2, ensure_ascii=False) + "\n")
 
     if not args.quiet:
         resumo = report.resumo(achados)
@@ -146,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
               + (f" — BLOQUEANTES: {', '.join(bloqueantes)}" if bloqueantes else ""))
         print(f"saída:        {destino_md}")
         print(f"              {destino_json}")
+        print(f"              {destino_scoring}  (scoring: {scored_payload['summary']['total']} achados priorizados)")
 
     return 0
 

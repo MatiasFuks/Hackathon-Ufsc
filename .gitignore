@@ -18,6 +18,11 @@ venv/
 /bad-codebase/bootstrap/cache/*
 
 # Ambiente
+# Chave do Gemini. O template versionado é analyzer-env/workspace/.env.example.
+# Os .env de bad-codebase/ e bad-codebase-python/ já estão RASTREADOS: são
+# credenciais commitadas de propósito (o achado Q5) e esta regra não os
+# desversiona — se algum dia saírem do índice, precisam voltar com `git add -f`.
+.env
 .DS_Store
 .idea/
 .vscode/

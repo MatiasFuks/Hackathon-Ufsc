@@ -81,6 +81,19 @@ BANDIT_RULES: dict[str, dict] = {
     ),
 }
 
+# Itens do questionário que este detector NÃO pode assegurar, mesmo tendo
+# regra mapeada para eles.
+#
+# Q6 (debug em produção): B201 está no catálogo acima porque, se o bandit
+# reportar, queremos o achado. Mas foi MEDIDO que ele não reporta neste repo —
+# `run.py` faz `from app.everything import app` e o bandit não reconhece o
+# objeto como app Flask (teste de controle: com `from flask import Flask` no
+# mesmo arquivo, o B201 dispara). Declarar Q6 como coberto faria o pipeline
+# responder "sem achado" para uma pergunta que ninguém verificou de fato —
+# exatamente o erro que o comercial da HourTrack cometeu ao responder "Sim"
+# para tudo. Quem assegura Q6 é o detector builtin.
+ITENS_NAO_ASSEGURADOS = {"Q6"}
+
 # ---------------------------------------------------------------------------
 # Catálogo pylint: symbol -> metadados. Whitelist deliberadamente curta.
 #
@@ -322,15 +335,14 @@ def _sqli_origin(repo: str, rel_path: str, line: int) -> tuple[str, str]:
 # ===========================================================================
 # Ferramentas
 # ===========================================================================
-def run_bandit(repo: str) -> tuple[list[Finding], ToolRun]:
-    ok, out, err = _run(["bandit", "-r", repo, "-f", "json", "-q"])
-    if not ok:
-        return [], ToolRun("bandit", available=False, ok=False, error=err)
-    try:
-        payload = json.loads(out)
-    except json.JSONDecodeError:
-        return [], ToolRun("bandit", available=True, ok=False, error="stdout não é JSON")
+def normalize_bandit(payload: dict, repo: str) -> tuple[list[Finding], int]:
+    """
+    Converte o JSON do bandit em Findings. Função pura: não invoca subprocess.
 
+    Separada de `run_bandit` de propósito — é o que permite testar o mandato,
+    o mapeamento de CWE e o cross-check anti-FP sem ter bandit instalado.
+    Devolve (achados, quantos foram descartados por estarem fora do mandato).
+    """
     findings, discarded = [], 0
     for issue in payload.get("results", []):
         test_id = issue.get("test_id", "")
@@ -373,7 +385,19 @@ def run_bandit(repo: str) -> tuple[list[Finding], ToolRun]:
             corroborated_by=corroboration,
             metrics={"bandit_severity": issue.get("issue_severity", "")},
         ))
+    return findings, discarded
 
+
+def run_bandit(repo: str) -> tuple[list[Finding], ToolRun]:
+    ok, out, err = _run(["bandit", "-r", repo, "-f", "json", "-q"])
+    if not ok:
+        return [], ToolRun("bandit", available=False, ok=False, error=err)
+    try:
+        payload = json.loads(out)
+    except json.JSONDecodeError:
+        return [], ToolRun("bandit", available=True, ok=False, error="stdout não é JSON")
+
+    findings, discarded = normalize_bandit(payload, repo)
     status = ToolRun("bandit", available=True, ok=True, findings=len(findings))
     status.notes.append(f"{discarded} achados fora do mandato descartados")
     if not any(f.rule_id == "bandit:B201" for f in findings):
@@ -384,15 +408,8 @@ def run_bandit(repo: str) -> tuple[list[Finding], ToolRun]:
     return findings, status
 
 
-def run_radon(repo: str) -> tuple[list[Finding], ToolRun]:
-    ok, out, err = _run(["radon", "cc", repo, "-j"])
-    if not ok:
-        return [], ToolRun("radon", available=False, ok=False, error=err)
-    try:
-        payload = json.loads(out)
-    except json.JSONDecodeError:
-        return [], ToolRun("radon", available=True, ok=False, error="stdout não é JSON")
-
+def normalize_radon(payload: dict, repo: str) -> list[Finding]:
+    """Converte o JSON do `radon cc` em Findings. Função pura."""
     findings = []
     for path, blocks in sorted(payload.items()):
         if not isinstance(blocks, list):      # radon reporta erro por arquivo
@@ -427,20 +444,23 @@ def run_radon(repo: str) -> tuple[list[Finding], ToolRun]:
                 debt_id=debt_id,
                 metrics={"cc": cc, "radon_rank": block.get("rank", ""), "symbol": name},
             ))
+    return findings
+
+
+def run_radon(repo: str) -> tuple[list[Finding], ToolRun]:
+    ok, out, err = _run(["radon", "cc", repo, "-j"])
+    if not ok:
+        return [], ToolRun("radon", available=False, ok=False, error=err)
+    try:
+        payload = json.loads(out)
+    except json.JSONDecodeError:
+        return [], ToolRun("radon", available=True, ok=False, error="stdout não é JSON")
+    findings = normalize_radon(payload, repo)
     return findings, ToolRun("radon", available=True, ok=True, findings=len(findings))
 
 
-def run_pylint(repo: str) -> tuple[list[Finding], ToolRun]:
-    # --disable=C apenas. Desabilitar R também (como sugere o FERRAMENTAS.md)
-    # mataria too-many-branches/locals, que são justamente o que aproveitamos.
-    ok, out, err = _run(["pylint", repo, "--output-format=json", "--disable=C"])
-    if not ok:
-        return [], ToolRun("pylint", available=False, ok=False, error=err)
-    try:
-        payload = json.loads(out or "[]")
-    except json.JSONDecodeError:
-        return [], ToolRun("pylint", available=True, ok=False, error="stdout não é JSON")
-
+def normalize_pylint(payload: list, repo: str) -> tuple[list[Finding], int]:
+    """Converte o JSON do pylint em Findings. Função pura."""
     findings, discarded = [], 0
     for msg in payload:
         symbol = msg.get("symbol", "")
@@ -466,6 +486,20 @@ def run_pylint(repo: str) -> tuple[list[Finding], ToolRun]:
             debt_id=rule["debt_id"],
             metrics={"pylint_type": msg.get("type", "")},
         ))
+    return findings, discarded
+
+
+def run_pylint(repo: str) -> tuple[list[Finding], ToolRun]:
+    # --disable=C apenas. Desabilitar R também (como sugere o FERRAMENTAS.md)
+    # mataria too-many-branches/locals, que são justamente o que aproveitamos.
+    ok, out, err = _run(["pylint", repo, "--output-format=json", "--disable=C"])
+    if not ok:
+        return [], ToolRun("pylint", available=False, ok=False, error=err)
+    try:
+        payload = json.loads(out or "[]")
+    except json.JSONDecodeError:
+        return [], ToolRun("pylint", available=True, ok=False, error="stdout não é JSON")
+    findings, discarded = normalize_pylint(payload, repo)
     status = ToolRun("pylint", available=True, ok=True, findings=len(findings))
     status.notes.append(f"{discarded} mensagens fora da whitelist descartadas (inclui import-error)")
     return findings, status
@@ -538,3 +572,32 @@ def analyze(repo: str, use_semgrep: bool = True) -> tuple[list[Finding], list[To
 
     findings.sort(key=lambda f: f.uid)   # ordem determinística de saída
     return findings, runs
+
+
+def cobertura_questionario(ferramentas_ok: set[str] | None = None) -> set[str]:
+    """
+    Itens do security-questionnaire.md que este detector EFETIVAMENTE verificou.
+
+    Contrato que todo detector expõe. O relatório usa isso para distinguir
+    "não achamos nada" (conforme) de "ninguém olhou" (sem cobertura) — a
+    diferença entre responder o questionário com honestidade e chutar.
+
+    `ferramentas_ok` é o conjunto de ferramentas que rodaram com sucesso. Sem
+    esse filtro o pipeline afirmaria conformidade em Q1/Q3/Q4/Q7 mesmo com o
+    bandit ausente, que é exatamente o erro que o time comercial da HourTrack
+    cometeu ao responder "Sim" para tudo.
+
+    Cobertura máxima possível aqui: Q1, Q3, Q4 e Q7 (bandit). Q2 (XSS) e
+    Q6 (debug) nunca aparecem — nenhuma das quatro ferramentas os detecta
+    neste repo; são responsabilidade do detector builtin.
+    """
+    catalogos = (("bandit", BANDIT_RULES), ("pylint", PYLINT_RULES))
+    itens: set[str] = set()
+    for ferramenta, catalogo in catalogos:
+        if ferramentas_ok is not None and ferramenta not in ferramentas_ok:
+            continue
+        for rule in catalogo.values():
+            raw = rule.get("questionnaire_item")
+            if raw:
+                itens.update(p.strip() for p in raw.split(","))
+    return itens - ITENS_NAO_ASSEGURADOS

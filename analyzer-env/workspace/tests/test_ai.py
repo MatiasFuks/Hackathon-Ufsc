@@ -94,7 +94,7 @@ class Cache(unittest.TestCase):
                             [{"titulo": "t", "o_que_e": "o", "consequencia": "c",
                               "debitos": ["DT-04"]}])
                     for chave in ai.SECOES}
-        for lista in ("plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
+        for lista in ("plano_release", "plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
             completo[lista] = ["item"]
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -148,6 +148,14 @@ class Degradacao(unittest.TestCase):
             with self.subTest(secao=secao):
                 self.assertIn(secao, md)
 
+    def test_plano_separa_release_da_janela_de_auditoria(self):
+        """O relatório mostra a janela de 14 dias (Release) separada do Furacão (15–30d)."""
+        md = report.render_markdown(
+            [mk()], {"name": "x", "languages": ["python"]}, [], {"Q4"},
+        )
+        self.assertIn(scoring.Horizon.RELEASE.value, md)
+        self.assertIn(scoring.Horizon.FURACAO.value, md)
+
 
 class ValidacaoDaResposta(unittest.TestCase):
     def test_resposta_incompleta_e_descartada(self):
@@ -160,16 +168,26 @@ class ValidacaoDaResposta(unittest.TestCase):
         """
         dados = {chave: "t" for chave in ai.SECOES}
         dados["riscos"] = [{"titulo": "t", "o_que_e": "o", "consequencia": "c"}]
-        for lista in ("plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
+        for lista in ("plano_release", "plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
             dados[lista] = ["x"]
         self.assertIsNone(ai._validar(dados))
 
     def test_risco_malformado_invalida_tudo(self):
         dados = {chave: "t" for chave in ai.SECOES}
         dados["riscos"] = [{"titulo": "sem os outros campos"}]
-        for lista in ("plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
+        for lista in ("plano_release", "plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
             dados[lista] = ["x"]
         self.assertIsNone(ai._validar(dados))
+
+    def test_plano_release_e_secao_obrigatoria(self):
+        """A janela de 14 dias (Release) virou seção própria; sua ausência invalida a resposta."""
+        dados = {chave: "t" for chave in ai.SECOES}
+        dados["riscos"] = [{"titulo": "t", "o_que_e": "o", "consequencia": "c", "debitos": ["DT-04"]}]
+        for lista in ("plano_release", "plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
+            dados[lista] = ["x"]
+        self.assertIsNotNone(ai._validar(dados))       # resposta completa valida
+        dados.pop("plano_release")
+        self.assertIsNone(ai._validar(dados))           # sem a seção nova, rejeita
 
     def test_json_dentro_de_cerca_de_codigo_e_aceito(self):
         bruto = '```json\n{"a": 1}\n```'
@@ -225,7 +243,7 @@ class AterramentoDosRiscos(unittest.TestCase):
         narrativa = {chave: "texto" for chave in ai.SECOES}
         narrativa["riscos"] = [{"titulo": "inventado", "o_que_e": "x",
                                 "consequencia": "y", "debitos": ["DT-99"]}]
-        for lista in ("plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
+        for lista in ("plano_release", "plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
             narrativa[lista] = ["item"]
         md = report.render_markdown(
             [mk()], {"name": "x", "languages": ["python"]}, [], {"Q4"},

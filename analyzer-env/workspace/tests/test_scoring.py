@@ -159,16 +159,30 @@ def test_override_nao_dispara_em_item_nao_bloqueante():
     assert sf.priority is not scoring.Priority.CRITICA
 
 
-def test_horizonte_furacao_bloqueador_e_quick_win_critico():
-    """Furacão (0–30d): bloqueadores de contrato e críticos baratos (ex.: debug=True)."""
+def test_horizonte_release_recebe_bloqueadores_de_contrato():
+    """Release (0–14d): bloqueador de contrato (Q1/Q2 + confiança Alta) começa no dia 1.
+
+    É a separação do antigo Furacão: só o que trava o contrato entra na janela
+    da release; o resto da segurança crítica corre depois (Furacão 15–30d).
+    """
     ctx = scoring.ScoringContext()
     bloqueador = mk(category=Category.SEGURANCA, severity=Severity.CRITICA,
                     confidence=Confidence.ALTA, questionnaire_item="Q1", effort_points=3.0)
-    quick_win = mk(category=Category.SEGURANCA, severity=Severity.CRITICA,
-                   confidence=Confidence.ALTA, questionnaire_item="Q6", effort_points=0.5)  # debug
+    assert scoring.score_one(bloqueador, ctx).horizon is scoring.Horizon.RELEASE
 
-    assert scoring.score_one(bloqueador, ctx).horizon is scoring.Horizon.FURACAO
-    assert scoring.score_one(quick_win, ctx).horizon is scoring.Horizon.FURACAO
+
+def test_horizonte_furacao_seguranca_critica_nao_bloqueadora():
+    """Furacão (15–30d): segurança crítica que NÃO trava contrato — pós-release, antes da auditoria."""
+    ctx = scoring.ScoringContext()
+    # Q6 (debug) não é bloqueante; crítico barato vai pro Furacão (15–30d), não pro Release
+    critico = mk(category=Category.SEGURANCA, severity=Severity.CRITICA,
+                 confidence=Confidence.ALTA, questionnaire_item="Q6", effort_points=0.5)
+    # MD5 (Q3/Q7), confiança Média: crítico por score, mas não é bloqueador de contrato
+    md5 = mk(category=Category.SEGURANCA, severity=Severity.CRITICA,
+             confidence=Confidence.MEDIA, questionnaire_item="Q3,Q7", effort_points=3.0)
+
+    assert scoring.score_one(critico, ctx).horizon is scoring.Horizon.FURACAO
+    assert scoring.score_one(md5, ctx).horizon is scoring.Horizon.FURACAO
 
 
 def test_horizonte_curto_prazo_critico_caro_alta_e_bus_factor():

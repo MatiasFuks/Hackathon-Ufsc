@@ -322,6 +322,7 @@ def render_json(
 # ===========================================================================
 # Narrativa estática — o relatório tem que ficar completo sem IA
 # ===========================================================================
+_RELEASE = scoring.Horizon.RELEASE.value
 _FURACAO = scoring.Horizon.FURACAO.value
 _CURTO = scoring.Horizon.CURTO_PRAZO.value
 _BACKLOG = scoring.Horizon.BACKLOG.value
@@ -355,9 +356,10 @@ def narrativa_estatica(
             f"O questionário de segurança do cliente enterprise reprova em "
             f"{len(falhas)} dos {len(QUESTIONARIO)} itens. "
             f"{len(bloqueios)} deles são bloqueantes: o contrato de R$ 8.000/mês "
-            f"não pode ser assinado enquanto existirem. Todo o trabalho do "
-            f"primeiro horizonte custa {custos[_FURACAO]['story_points']} story "
-            f"points, cerca de {custos[_FURACAO]['semanas']} semanas do time."
+            f"não pode ser assinado enquanto existirem. Os bloqueadores de contrato "
+            f"custam {custos[_RELEASE]['story_points']} story points, cerca de "
+            f"{custos[_RELEASE]['semanas']} semanas do time, e precisam começar já, "
+            f"dentro da janela dos 14 dias da release."
         )
     else:
         sem_cobertura = sum(1 for q in cartao if q["estado"] == "sem_cobertura")
@@ -380,11 +382,17 @@ def narrativa_estatica(
         ),
         "situacao_do_contrato": situacao,
         "riscos": riscos,
+        "plano_release": [
+            f"Corrigir os {custos[_RELEASE]['achados']} bloqueadores de contrato "
+            f"({custos[_RELEASE]['story_points']} SP) — o SQL Injection confirmado: "
+            f"é o que trava a assinatura e precisa começar no dia 1.",
+            "Congelar qualquer refatoração estrutural durante os 14 dias da release: "
+            "sem ambiente de teste, mudança grande vai direto para produção.",
+        ],
         "plano_furacao": [
-            f"Corrigir os {custos[_FURACAO]['achados']} itens do primeiro horizonte "
-            f"({custos[_FURACAO]['story_points']} SP): é o que desbloqueia o "
-            f"questionário e, com ele, o contrato.",
-            "Não iniciar nenhuma refatoração estrutural durante os 14 dias da release.",
+            f"Tratar os {custos[_FURACAO]['achados']} itens restantes de segurança "
+            f"crítica ({custos[_FURACAO]['story_points']} SP) depois da release "
+            f"entregue e antes da auditoria de 30 dias.",
         ],
         "plano_curto_prazo": [
             f"Tratar os {custos[_CURTO]['achados']} itens de 4 a 8 semanas "
@@ -570,7 +578,7 @@ def render_markdown(
     add("")
     add("| Horizonte | Débitos | Esforço | Semanas de time |")
     add("|---|---:|---:|---:|")
-    for janela in (_FURACAO, _CURTO, _BACKLOG):
+    for janela in (_RELEASE, _FURACAO, _CURTO, _BACKLOG):
         dados = custos[janela]
         add(f"| {janela} | {dados['achados']} | {dados['story_points']} SP | "
             f"{dados['semanas']} |")
@@ -586,12 +594,13 @@ def render_markdown(
     # ------------------------------------------------------------------ plano
     add("## Plano")
     add("")
-    for chave, titulo in (("plano_furacao", f"{_FURACAO} — desbloquear contrato e release"),
+    for chave, titulo in (("plano_release", f"{_RELEASE} — desbloquear o contrato"),
+                          ("plano_furacao", f"{_FURACAO} — segurança crítica até a auditoria"),
                           ("plano_curto_prazo", f"{_CURTO} — destravar a próxima feature"),
                           ("plano_backlog", f"{_BACKLOG}")):
         add(f"### {titulo}")
         add("")
-        for item in texto[chave]:
+        for item in texto.get(chave) or []:
             add(f"- {item}")
         add("")
 

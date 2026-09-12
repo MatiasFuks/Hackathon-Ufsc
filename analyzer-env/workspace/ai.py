@@ -49,7 +49,8 @@ from typing import Any
 MODELOS = ("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3-flash-preview")
 
 # Muda quando o prompt muda, para invalidar o cache.
-PROMPT_VERSION = "v3"
+# v4: Furacão dividido em plano_release (0–14d) + plano_furacao (15–30d).
+PROMPT_VERSION = "v4"
 
 CACHE_DIR_PADRAO = ".ai-cache"
 
@@ -67,6 +68,7 @@ SECOES = (
     "resumo_executivo",
     "situacao_do_contrato",
     "riscos",
+    "plano_release",
     "plano_furacao",
     "plano_curto_prazo",
     "plano_backlog",
@@ -122,7 +124,8 @@ Responda SOMENTE com um objeto JSON válido, sem cercas de código, com estas ch
      "consequencia": "1 frase: o que acontece com o negócio se nada for feito",
      "debitos": ["os códigos DT-xx da lista de achados que este risco resume"]}
   ],
-  "plano_furacao": ["itens curtos, no imperativo: o que fazer nos primeiros 30 dias para desbloquear o contrato e entregar a release"],
+  "plano_release": ["itens curtos, no imperativo: o que fazer nos 14 dias da release — corrigir os bloqueadores de contrato (o SQL Injection confirmado) e congelar refatorações estruturais, porque não há ambiente de teste"],
+  "plano_furacao": ["itens curtos, no imperativo: a segurança crítica restante, para os dias 15 a 30 (depois da release entregue e antes da auditoria do contrato)"],
   "plano_curto_prazo": ["itens curtos: o que fazer em 4 a 8 semanas, incluindo preparar a saída do desenvolvedor principal"],
   "plano_backlog": ["itens curtos: o que entra no roadmap estruturado, sem urgência"],
   "nao_vamos_fazer": ["2 a 4 itens, cada um no formato 'o quê — por quê não agora'"],
@@ -212,7 +215,7 @@ def _validar(dados: Any) -> dict[str, Any] | None:
             return None
         if not isinstance(risco["debitos"], list):
             return None
-    for chave in ("plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
+    for chave in ("plano_release", "plano_furacao", "plano_curto_prazo", "plano_backlog", "nao_vamos_fazer"):
         if not isinstance(dados[chave], list):
             return None
     return dados

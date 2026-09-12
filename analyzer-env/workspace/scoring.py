@@ -34,8 +34,15 @@ class Priority(str, Enum):
 
 
 class Horizon(str, Enum):
-    """Em qual janela o débito deve ser atacado (slide s2c do deck)."""
-    FURACAO = "Furacão (0–30 dias)"       # desbloqueia contrato/release
+    """Em qual janela o débito deve ser atacado (slide s2c do deck).
+
+    O antigo Furacão (0–30d) foi dividido em duas janelas porque a HourTrack tem
+    DOIS prazos distintos: a release em 14 dias (congelamento) e a auditoria do
+    contrato em 30. Só os bloqueadores de contrato entram na release; o resto da
+    segurança crítica corre depois dela, ainda antes da auditoria.
+    """
+    RELEASE = "Release (0–14 dias)"       # bloqueadores de contrato: começam no dia 1
+    FURACAO = "Furacão (15–30 dias)"      # resto da segurança crítica: pós-release, pré-auditoria
     CURTO_PRAZO = "4–8 semanas"            # destrava a próxima feature; prepara a saída do dev
     BACKLOG = "Backlog estruturado"       # roadmap, não sprint de emergência
 
@@ -65,16 +72,19 @@ def _questionnaire_items(finding: Finding) -> set[str]:
 
 def horizon_for(finding: Finding, priority: Priority, is_blocker: bool) -> Horizon:
     """
-    Mapeia o achado num dos 3 horizontes do deck (slide s2c).
+    Mapeia o achado num dos 4 horizontes (slide s2c, com o Furacão dividido).
 
-    🌀 Furacão: bloqueadores de contrato + críticos baratos (quick wins como
-       `debug=True`) — tudo que desbloqueia os 14/30 dias e cabe na janela.
+    🚨 Release (0–14d): bloqueadores de contrato (Q1/Q2 + confiança Alta). É o que
+       trava o contrato — começa no dia 1, na janela da release. O esforço grande
+       já foi barrado antes pela penalidade ×0.5 (não cabe no congelamento).
+    🌀 Furacão (15–30d): o resto da segurança crítica (ex.: MD5, SQLi de confiança
+       Média) — feito depois da release entregue, ainda antes da auditoria.
     🔧 4–8 semanas: Alta, críticos caros demais pra janela (precisam de plano) e
        mitigadores da saída do dev (testes/documentação).
     🚀 Backlog: o resto (Média/Baixa, performance, refatoração grande).
     """
     if is_blocker:
-        return Horizon.FURACAO
+        return Horizon.RELEASE
     if priority is Priority.CRITICA:
         return Horizon.FURACAO if finding.effort_points <= 5 else Horizon.CURTO_PRAZO
     if priority is Priority.ALTA or finding.mitigates_bus_factor:

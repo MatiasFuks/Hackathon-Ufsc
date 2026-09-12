@@ -19,8 +19,9 @@
 - **Detectável por:** quais ferramentas pegam o achado (com ID/severidade esperados) — coluna que
   vira teste de regressão do pipeline. `—` = nenhuma ferramenta pega; é **julgamento humano/IA**.
 - **Questionário:** se o achado derruba uma resposta do `security-questionnaire.md` / do deck.
-- **Horizonte:** 🌀 Furacão (0–30d, desbloqueia release/contrato) · 🔧 4–8 semanas (destrava a
-  próxima feature / prepara a saída do dev) · 🚀 Backlog (roadmap estruturado).
+- **Horizonte:** 🚨 Release (0–14d, bloqueadores de contrato) · 🌀 Furacão (15–30d, segurança crítica
+  restante até a auditoria) · 🔧 4–8 semanas (destrava a próxima feature / prepara a saída do dev) ·
+  🚀 Backlog (roadmap estruturado).
 
 > ⚠️ Os débitos que só o julgamento humano pega (`—` na coluna de detecção) são os de **maior valor
 > de pontuação**: são a matéria-prima da seção obrigatória *"o que a IA/ferramenta errou"*.
@@ -158,12 +159,14 @@ Use esta tabela para validar o pipeline: se o `bandit` não reportar B324/B201/B
 
 ## Prévia da resposta "CTO por um dia"
 
-Mapeando os 29 débitos nos 3 horizontes do briefing (slide s2c):
+Mapeando os 29 débitos nos horizontes (o Furacão do briefing dividido em release + pré-auditoria):
 
-- **🌀 Furacão (0–30 dias) — desbloquear contrato + release:** DT-05 (debug, trivial), DT-03 (MD5),
-  DT-01 (SQLi), DT-02 (XSS), DT-04 (segredos), e o **plano de remediação** de DT-06/DT-07 (auth +
-  isolamento) — os quatro primeiros fecham a Seção 2 do questionário (bloqueante); auth precisa ao
-  menos de plano crível em 30 dias.
+- **🚨 Release (0–14 dias) — desbloquear o contrato:** DT-01 (SQLi) e DT-02 (XSS) — os bloqueadores
+  da Seção 2 do questionário, que travam a assinatura. Durante a janela, congelar refatoração
+  estrutural (sem ambiente de teste, mudança grande vai direto pra produção).
+- **🌀 Furacão (15–30 dias) — segurança crítica restante até a auditoria:** DT-05 (debug, trivial),
+  DT-03 (MD5), DT-04 (segredos), e o **plano de remediação** de DT-06/DT-07 (auth + isolamento) —
+  feitos depois da release entregue, ainda antes da auditoria de 30 dias.
 - **🔧 4–8 semanas — destravar a próxima feature e a saída do dev:** DT-15 (faturamento quebrado),
   DT-11 (`handle_date`), DT-12 (duplicação), DT-25 (testes como rede de segurança **antes** do dev
   sair), DT-14/DT-22/DT-27/DT-29.

@@ -15,9 +15,12 @@ Três regras que este módulo NÃO viola
    vazar o segredo do cliente para fora enquanto escrevemos o relatório que
    denuncia justamente esse problema.
 
-3. A chave de API vem SEMPRE de variável de ambiente (`GOOGLE_API_KEY`).
-   Nunca de arquivo no repositório. Este pipeline reporta credencial
-   hardcoded como débito crítico; hardcodear a própria seria patético.
+3. A chave de API é lida SEMPRE de variável de ambiente (`GOOGLE_API_KEY`):
+   `gerar_narrativa` não conhece nenhuma outra fonte. Um `.env` local pode
+   SEMEAR essa variável no arranque (`carregar_dotenv`), mas esse arquivo é
+   ignorado pelo git e nunca entra no repositório — é o mesmo caminho que o
+   FERRAMENTAS.md indica. Este pipeline reporta credencial hardcoded como
+   débito crítico (DT-04); hardcodear a própria seria patético.
 
 Determinismo com IA no meio
 ---------------------------
@@ -53,6 +56,10 @@ MODELOS = ("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3-flash-pr
 PROMPT_VERSION = "v4"
 
 CACHE_DIR_PADRAO = ".ai-cache"
+
+# Arquivo que semeia GOOGLE_API_KEY quando ela não está exportada no shell.
+# Fica fora do git (ver .gitignore); o template versionado é o .env.example.
+ARQUIVO_ENV = ".env"
 
 # Timeout da chamada HTTP ao Gemini, em segundos.
 #
@@ -147,6 +154,60 @@ Restrições de fidelidade — o relatório é auditado contra os dados:
 - Não se contradiga entre seções: se o plano diz para fazer algo, a lista do
   que não será feito não pode dizer o contrário.
 """
+
+
+def carregar_dotenv(caminho: str = ARQUIVO_ENV) -> list[str]:
+    """
+    Semeia variáveis de ambiente a partir de um `.env` local.
+
+    Chamado uma vez no arranque do `main.py`. Existe só para poupar o
+    `export` manual a cada shell novo — `gerar_narrativa` continua lendo
+    exclusivamente de `os.environ`, e é isso que mantém a regra 3 do topo
+    do módulo verdadeira: a chave não é lida de arquivo, ela é EXPORTADA
+    por um arquivo antes de o pipeline começar.
+
+    Duas decisões que importam:
+
+    - Variável já definida (e não vazia) NUNCA é sobrescrita. Quem exporta
+      na mão, ou passa pelo docker-compose, manda mais que o arquivo. O
+      contrário faria um `.env` esquecido no disco vencer em silêncio a
+      chave que você acabou de digitar — o pior tipo de bug de configuração,
+      porque parece que funcionou.
+    - Arquivo ausente, ilegível ou malformado não é erro. Quebrar aqui
+      contrariaria a regra de que a IA é enfeite, não dependência: sem
+      `.env` o relatório sai inteiro com a narrativa estática.
+
+    Devolve os nomes das variáveis efetivamente definidas. O `main.py`
+    ignora o retorno; o teste usa para distinguir "definiu" de "respeitou o
+    que já estava no ambiente".
+    """
+    definidas: list[str] = []
+    try:
+        with open(caminho, encoding="utf-8") as fh:
+            linhas = fh.readlines()
+    except OSError:
+        return definidas
+
+    for linha in linhas:
+        linha = linha.strip()
+        if not linha or linha.startswith("#") or "=" not in linha:
+            continue
+        nome, _, valor = linha.partition("=")
+        nome = nome.strip()
+        if nome.startswith("export "):          # tolera a forma copiada do shell
+            nome = nome[len("export "):].strip()
+        valor = valor.strip()
+        # Aspas são delimitador do arquivo, não parte do segredo. Uma chave
+        # gravada como "AIza..." precisa chegar à API sem as aspas.
+        if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in "\"'":
+            valor = valor[1:-1]
+        # `.strip()` no que já existe: ambiente com valor vazio conta como
+        # ausente, exatamente como `gerar_narrativa` o trata mais abaixo.
+        if not nome or os.environ.get(nome, "").strip():
+            continue
+        os.environ[nome] = valor
+        definidas.append(nome)
+    return definidas
 
 
 def montar_payload(

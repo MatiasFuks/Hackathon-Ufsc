@@ -106,8 +106,15 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"modelo Gemini (padrão: tenta {', '.join(ai.MODELOS)})")
     parser.add_argument("--ai-cache", default=ai.CACHE_DIR_PADRAO, metavar="DIR",
                         help=f"cache das respostas da IA (padrão: {ai.CACHE_DIR_PADRAO})")
+    parser.add_argument("--env-file", default=ai.ARQUIVO_ENV, metavar="ARQUIVO",
+                        help=f"arquivo que semeia GOOGLE_API_KEY se ela não estiver "
+                             f"exportada (padrão: {ai.ARQUIVO_ENV}; ausente = ignorado)")
     parser.add_argument("-q", "--quiet", action="store_true", help="não imprime resumo")
     args = parser.parse_args(argv)
+
+    # Semeia GOOGLE_API_KEY a partir do .env, se existir. Precisa vir antes de
+    # qualquer coisa ler o ambiente; o que já estiver exportado tem precedência.
+    ai.carregar_dotenv(args.env_file)
 
     repo = os.path.abspath(args.repo)
     if not os.path.isdir(repo):

@@ -251,3 +251,73 @@ class AterramentoDosRiscos(unittest.TestCase):
         )
         self.assertIn("Credencial hardcoded", md)   # verbete estático do glossário
         self.assertNotIn("inventado", md)
+
+
+class CarregarDotenv(unittest.TestCase):
+    """
+    O `.env` semeia o ambiente; ele não é uma segunda fonte de chave.
+
+    O que precisa ser garantido aqui é a precedência (ambiente vence arquivo)
+    e a degradação (arquivo ausente ou torto não derruba nada). Se a
+    precedência inverter, um `.env` esquecido no disco passa a vencer em
+    silêncio a chave recém-exportada — e o sintoma é "a chave certa não
+    funciona", que custa muito tempo para diagnosticar.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.anterior = os.environ.pop("VAR_DE_TESTE_DOTENV", None)
+        self.addCleanup(self._restaurar)
+
+    def _restaurar(self):
+        os.environ.pop("VAR_DE_TESTE_DOTENV", None)
+        if self.anterior is not None:
+            os.environ["VAR_DE_TESTE_DOTENV"] = self.anterior
+
+    def _escrever(self, conteudo: str) -> str:
+        caminho = os.path.join(self.dir.name, ".env")
+        with open(caminho, "w", encoding="utf-8") as fh:
+            fh.write(conteudo)
+        return caminho
+
+    def test_define_variavel_ausente(self):
+        caminho = self._escrever("VAR_DE_TESTE_DOTENV=segredo\n")
+        self.assertEqual(ai.carregar_dotenv(caminho), ["VAR_DE_TESTE_DOTENV"])
+        self.assertEqual(os.environ["VAR_DE_TESTE_DOTENV"], "segredo")
+
+    def test_ambiente_existente_vence_o_arquivo(self):
+        os.environ["VAR_DE_TESTE_DOTENV"] = "exportada-na-mao"
+        caminho = self._escrever("VAR_DE_TESTE_DOTENV=do-arquivo\n")
+        self.assertEqual(ai.carregar_dotenv(caminho), [])
+        self.assertEqual(os.environ["VAR_DE_TESTE_DOTENV"], "exportada-na-mao")
+
+    def test_ambiente_vazio_conta_como_ausente(self):
+        """`gerar_narrativa` trata chave vazia como não definida; aqui idem."""
+        os.environ["VAR_DE_TESTE_DOTENV"] = "   "
+        caminho = self._escrever("VAR_DE_TESTE_DOTENV=do-arquivo\n")
+        self.assertEqual(ai.carregar_dotenv(caminho), ["VAR_DE_TESTE_DOTENV"])
+        self.assertEqual(os.environ["VAR_DE_TESTE_DOTENV"], "do-arquivo")
+
+    def test_tolera_comentario_aspas_e_export(self):
+        caminho = self._escrever(
+            "# comentário\n"
+            "\n"
+            "linha sem igual\n"
+            'export VAR_DE_TESTE_DOTENV="com-aspas"\n'
+        )
+        ai.carregar_dotenv(caminho)
+        self.assertEqual(os.environ["VAR_DE_TESTE_DOTENV"], "com-aspas")
+
+    def test_arquivo_ausente_nao_e_erro(self):
+        """Sem .env o pipeline roda igual — a IA é enfeite, não dependência."""
+        ausente = os.path.join(self.dir.name, "nao-existe.env")
+        self.assertEqual(ai.carregar_dotenv(ausente), [])
+
+    def test_env_example_versionado_nao_carrega_chave(self):
+        """O template do repositório precisa continuar sem segredo dentro."""
+        exemplo = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env.example")
+        with open(exemplo, encoding="utf-8") as fh:
+            for linha in fh:
+                if linha.startswith("GOOGLE_API_KEY"):
+                    self.assertEqual(linha.strip(), "GOOGLE_API_KEY=")

@@ -9,6 +9,12 @@ services:
       # pasta onde os alunos desenvolvem o pipeline (leitura/escrita)
       - ./workspace:/workspace
     working_dir: /workspace
+    environment:
+      # Repassa a chave do host, se ela estiver exportada lá. O valor NUNCA
+      # é escrito aqui: este arquivo é versionado. Sem chave no host, o
+      # workspace/.env cobre o caso — ele é montado junto com o workspace e
+      # lido no arranque por ai.carregar_dotenv().
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     stdin_open: true
     tty: true
     # Para entrar no container interativamente:

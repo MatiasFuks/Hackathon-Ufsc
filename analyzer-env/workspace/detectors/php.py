@@ -75,7 +75,8 @@ import os
 import re
 
 from detectors.base import (
-    ToolRun, listar_arquivos, ler, numero_da_linha, rel_path, run_tool, snippet,
+    ToolRun, excluir_semgrep, listar_arquivos, ler, numero_da_linha, rel_path,
+    run_tool, snippet,
 )
 from models import Category, Confidence, Finding, Language, Severity
 
@@ -520,6 +521,17 @@ _ATRIB_SEGREDO = re.compile(
 # Chave de array: `'api_token' => 'VALOR',`
 _CHAVE_SEGREDO = re.compile(r"(['\"])(\w+)\1\s*=>\s*(['\"])([^'\"]{8,})\3")
 
+# Placeholder óbvio (`your-key-here`, `changeme`, `null`) — usado tanto por
+# `scan_segredos` (código PHP) quanto por `verificar_env_commitado` (.env).
+# Compartilhado de propósito: um valor que não é segredo em `$x = 'null';`
+# também não é segredo em `REDIS_PASSWORD=null` — é o mesmo defeito de
+# reconhecimento, só que em arquivos diferentes.
+_PLACEHOLDER_SEGREDO = re.compile(
+    r"^(?:null|none|false|true|changeme|your[-_ ]|xxx+|\.{3}|example|dummy|"
+    r"placeholder|test|sk_test|localhost|utf8|utf8mb4|database|password)$",
+    re.I,
+)
+
 
 def scan_segredos(repo: str) -> list[Finding]:
     """
@@ -532,11 +544,7 @@ def scan_segredos(repo: str) -> list[Finding]:
       3. placeholder óbvio (`your-key-here`, `changeme`, `null`) é ignorado.
     """
     regra = DEBITOS["DT-04"]
-    placeholders = re.compile(
-        r"^(?:null|none|false|true|changeme|your[-_ ]|xxx+|\.{3}|example|dummy|"
-        r"placeholder|test|sk_test|localhost|utf8|utf8mb4|database|password)$",
-        re.I,
-    )
+    placeholders = _PLACEHOLDER_SEGREDO
     achados = []
     for rel in listar_arquivos(repo, (".php",)):
         source = ler(repo, rel)
@@ -736,6 +744,13 @@ def verificar_env_commitado(repo: str) -> tuple[list[Finding], str]:
     Distingue template de arquivo real: `.env.example` DEVE estar versionado
     (é a prática do Laravel). O que é dívida é um `.env` com valor preenchido.
 
+    Anti-falso-positivo: reutiliza `_PLACEHOLDER_SEGREDO` (mesma lista de
+    `scan_segredos`). Medido no alvo: `REDIS_PASSWORD=null` e
+    `MAIL_PASSWORD=null` são o default INTOCADO do `.env.example` — a chave
+    bate em `_ENV_CHAVE_SENSIVEL` e o valor não é vazio, então sem este filtro
+    o literal `"null"` era contado como segredo real. `APP_KEY` continua
+    reportado normalmente: é o único campo que de fato diverge do template.
+
     Devolve (achados, veredito) para o chamador declarar cobertura só quando a
     varredura realmente rodou.
     """
@@ -757,6 +772,8 @@ def verificar_env_commitado(repo: str) -> tuple[list[Finding], str]:
             chave, _, valor = linha.partition("=")
             chave, valor = chave.strip(), valor.strip().strip("'\"")
             if not valor or not _ENV_CHAVE_SENSIVEL.match(chave):
+                continue
+            if _PLACEHOLDER_SEGREDO.match(valor):
                 continue
             achados.append(Finding(
                 rule_id="builtin:PHP-ENV-COMMITADO",
@@ -1148,7 +1165,8 @@ def corroborate_with_semgrep(repo: str, findings: list[Finding], timeout: int = 
     mais precisa que o taint dele para este caso específico.
     """
     ok, out, err = run_tool(
-        ["semgrep", "--config=p/owasp-top-ten", "--json", "--metrics=off", "-q", repo],
+        ["semgrep", "--config=p/owasp-top-ten", "--json", "--metrics=off", "-q",
+         *excluir_semgrep(), repo],
         timeout=timeout,
     )
     if not ok:

@@ -39,7 +39,10 @@ from __future__ import annotations
 import ast
 import json
 
-from detectors.base import ToolRun, ler, rel_path, run_tool, snippet
+from detectors.base import (
+    ToolRun, excluir_bandit, excluir_pylint, excluir_radon, excluir_semgrep,
+    ler, rel_path, run_tool, snippet,
+)
 from models import Category, Confidence, Finding, Language, Severity
 
 # ---------------------------------------------------------------------------
@@ -347,7 +350,7 @@ def normalize_bandit(payload: dict, repo: str) -> tuple[list[Finding], int]:
 
 
 def run_bandit(repo: str) -> tuple[list[Finding], ToolRun]:
-    ok, out, err = run_tool(["bandit", "-r", repo, "-f", "json", "-q"])
+    ok, out, err = run_tool(["bandit", "-r", repo, "-f", "json", "-q", *excluir_bandit()])
     if not ok:
         return [], ToolRun("bandit", available=False, ok=False, error=err)
     try:
@@ -409,7 +412,7 @@ def normalize_radon(payload: dict, repo: str) -> list[Finding]:
 
 
 def run_radon(repo: str) -> tuple[list[Finding], ToolRun]:
-    ok, out, err = run_tool(["radon", "cc", repo, "-j"])
+    ok, out, err = run_tool(["radon", "cc", repo, "-j", *excluir_radon()])
     if not ok:
         return [], ToolRun("radon", available=False, ok=False, error=err)
     try:
@@ -453,7 +456,9 @@ def normalize_pylint(payload: list, repo: str) -> tuple[list[Finding], int]:
 def run_pylint(repo: str) -> tuple[list[Finding], ToolRun]:
     # --disable=C apenas. Desabilitar R também (como sugere o FERRAMENTAS.md)
     # mataria too-many-branches/locals, que são justamente o que aproveitamos.
-    ok, out, err = run_tool(["pylint", repo, "--output-format=json", "--disable=C"])
+    ok, out, err = run_tool(
+        ["pylint", repo, "--output-format=json", "--disable=C", *excluir_pylint()]
+    )
     if not ok:
         return [], ToolRun("pylint", available=False, ok=False, error=err)
     try:
@@ -476,7 +481,8 @@ def corroborate_with_semgrep(repo: str, findings: list[Finding], timeout: int = 
     bloco anti-falso-positivo. Precisa de internet; falhar aqui é aceitável.
     """
     ok, out, err = run_tool(
-        ["semgrep", "--config=p/owasp-top-ten", "--json", "--metrics=off", "-q", repo],
+        ["semgrep", "--config=p/owasp-top-ten", "--json", "--metrics=off", "-q",
+         *excluir_semgrep(), repo],
         timeout=timeout,
     )
     if not ok:

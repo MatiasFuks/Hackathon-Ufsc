@@ -29,6 +29,39 @@ IGNORAR_DIRS = {
 }
 
 
+def excluir_bandit() -> list[str]:
+    """`-x` do bandit: glob por CAMINHO, precisa de `*/` nas duas pontas."""
+    return ["-x", ",".join(f"*/{d}/*" for d in sorted(IGNORAR_DIRS))]
+
+
+def excluir_radon() -> list[str]:
+    """`-i` do radon: glob por NOME de diretório, radon nem desce nele."""
+    return ["-i", ",".join(sorted(IGNORAR_DIRS))]
+
+
+def excluir_pylint() -> list[str]:
+    """`--ignore` do pylint: base names, casa em qualquer profundidade."""
+    return ["--ignore=" + ",".join(sorted(IGNORAR_DIRS))]
+
+
+def excluir_semgrep() -> list[str]:
+    """
+    `--exclude` do semgrep, um por diretório (sintaxe gitignore: casa o nome
+    em qualquer profundidade, não precisa de glob explícito).
+
+    Sem isso, a corroboração de taint varre `vendor/`/`venv/` inteiros — no
+    alvo PHP são ~7700 arquivos de `vendor/`, no Python ~1900 de `venv/`.
+    Ferramenta rodando contra dependência de terceiro é exatamente o "falso
+    positivo em escala industrial" que este módulo já existe para evitar
+    (mesmo raciocínio de `IGNORAR_DIRS`, só que agora vale para tempo de
+    execução, não só para achado).
+    """
+    args = []
+    for d in sorted(IGNORAR_DIRS):
+        args += ["--exclude", d]
+    return args
+
+
 @dataclass
 class ToolRun:
     """

@@ -75,7 +75,8 @@ import os
 import re
 
 from detectors.base import (
-    ToolRun, listar_arquivos, ler, numero_da_linha, rel_path, run_tool, snippet,
+    ToolRun, excluir_semgrep, listar_arquivos, ler, numero_da_linha, rel_path,
+    run_tool, snippet,
 )
 from models import Category, Confidence, Finding, Language, Severity
 
@@ -1164,7 +1165,8 @@ def corroborate_with_semgrep(repo: str, findings: list[Finding], timeout: int = 
     mais precisa que o taint dele para este caso específico.
     """
     ok, out, err = run_tool(
-        ["semgrep", "--config=p/owasp-top-ten", "--json", "--metrics=off", "-q", repo],
+        ["semgrep", "--config=p/owasp-top-ten", "--json", "--metrics=off", "-q",
+         *excluir_semgrep(), repo],
         timeout=timeout,
     )
     if not ok:

@@ -11,8 +11,9 @@ import shutil
 import tempfile
 import unittest
 
+from detectors.base import run_tool
 from detectors.python import (
-    CC_BANDS, _run, _sqli_origin, analyze,
+    CC_BANDS, _sqli_origin, analyze,
     normalize_bandit, normalize_pylint, normalize_radon,
 )
 from models import Confidence, Severity, deduplicate
@@ -182,7 +183,7 @@ class MandatoPylint(unittest.TestCase):
 
 class DegradacaoSemFerramenta(unittest.TestCase):
     def test_binario_ausente_nao_levanta_excecao(self):
-        ok, out, err = _run(["ferramenta-que-nao-existe-xyz"])
+        ok, out, err = run_tool(["ferramenta-que-nao-existe-xyz"])
         self.assertFalse(ok)
         self.assertEqual(err, "ferramenta não instalada")
 

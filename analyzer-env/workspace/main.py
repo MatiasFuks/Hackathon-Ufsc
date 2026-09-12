@@ -26,11 +26,8 @@ import sys
 
 import report
 import scoring
+from detectors.base import IGNORAR_DIRS
 from models import Language, deduplicate
-
-# Diretórios que nunca entram na análise nem na detecção de linguagem.
-IGNORAR = {".git", "vendor", "node_modules", "__pycache__", ".venv", "venv",
-           "output", ".pytest_cache", "storage", "bootstrap"}
 
 # Registro de analisadores: linguagem -> módulo que expõe `analyze()`.
 # Suportar uma linguagem nova é uma linha aqui + um módulo novo.
@@ -46,7 +43,7 @@ def detectar_linguagens(repo: str) -> set[Language]:
     marcadores_py = {"requirements.txt", "pyproject.toml", "setup.py", "Pipfile"}
 
     for _, dirs, arquivos in os.walk(repo):
-        dirs[:] = [d for d in dirs if d not in IGNORAR and not d.startswith(".")]
+        dirs[:] = [d for d in dirs if d not in IGNORAR_DIRS and not d.startswith(".")]
         for nome in arquivos:
             if nome in marcadores_py or nome.endswith(".py"):
                 encontradas.add(Language.PYTHON)

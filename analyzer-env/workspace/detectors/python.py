@@ -18,6 +18,11 @@ Toda invocação tolera ferramenta ausente, quebrada ou lenta. O pipeline
 continua com o que sobrou e `ToolRun` registra o que rodou — requisito do
 README do desafio ("as ferramentas podem não estar instaladas").
 
+A mecânica compartilhada (`ToolRun`, `run_tool`, `rel_path`, `snippet`, `ler`)
+vive em `detectors/base.py` e é a MESMA usada por `detectors/php.py`. Aqui
+ficam só o catálogo de regras e a normalização — o que de fato é específico
+de Python.
+
 Cegueiras medidas (não são bugs do nosso pipeline)
 --------------------------------------------------
 - bandit NÃO reporta B201 em `run.py`: o arquivo faz `from app.everything
@@ -33,10 +38,8 @@ from __future__ import annotations
 
 import ast
 import json
-import os
-import subprocess
-from dataclasses import dataclass, field
 
+from detectors.base import ToolRun, ler, rel_path, run_tool, snippet
 from models import Category, Confidence, Finding, Language, Severity
 
 # ---------------------------------------------------------------------------
@@ -154,61 +157,6 @@ CC_BANDS = [
 CC_FLOOR = 11  # abaixo disso não gera achado
 
 
-@dataclass
-class ToolRun:
-    """Status de uma ferramenta externa — vai para o relatório."""
-    name: str
-    available: bool
-    ok: bool
-    findings: int = 0
-    error: str = ""
-    notes: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict:
-        return {
-            "tool": self.name, "available": self.available, "ok": self.ok,
-            "findings": self.findings, "error": self.error, "notes": self.notes,
-        }
-
-
-def _run(cmd: list[str], timeout: int = 120) -> tuple[bool, str, str]:
-    """
-    Executa a ferramenta. Nunca levanta exceção, nunca olha returncode.
-
-    bandit sai com 1 quando acha algo e pylint usa exit code como bitmask —
-    tratar returncode como falha descartaria justamente as execuções úteis.
-    O critério de sucesso é "stdout parseável", validado por quem chama.
-    """
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return True, p.stdout, p.stderr
-    except FileNotFoundError:
-        return False, "", "ferramenta não instalada"
-    except subprocess.TimeoutExpired:
-        return False, "", f"timeout após {timeout}s"
-    except OSError as exc:
-        return False, "", str(exc)
-
-
-def _rel(path: str, repo: str) -> str:
-    try:
-        return os.path.relpath(os.path.realpath(path), os.path.realpath(repo))
-    except ValueError:
-        return path
-
-
-def _snippet(repo: str, rel_path: str, line: int) -> str:
-    """Evidência: a linha do achado, sem indentação e truncada."""
-    try:
-        with open(os.path.join(repo, rel_path), encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-        if 1 <= line <= len(lines):
-            return lines[line - 1].strip()[:200]
-    except OSError:
-        pass
-    return ""
-
-
 # ===========================================================================
 # Cross-check anti-falso-positivo para SQL Injection
 #
@@ -289,20 +237,20 @@ class _OriginIndex:
         return "internal"
 
 
-def _sqli_origin(repo: str, rel_path: str, line: int) -> tuple[str, str]:
+def _sqli_origin(repo: str, rel: str, line: int) -> tuple[str, str]:
     """
     Classifica a origem dos valores interpolados no SQL próximo a `line`.
 
     Retorna (classificação, detalhe). Precedência: tainted > internal > literal.
     Determinístico: depende só do conteúdo do arquivo.
     """
-    full = os.path.join(repo, rel_path)
+    source = ler(repo, rel)
     try:
-        with open(full, encoding="utf-8", errors="replace") as fh:
-            source = fh.read()
         tree = ast.parse(source)
-    except (OSError, SyntaxError):
+    except SyntaxError:
         return "internal", "arquivo não parseável; confiança mantida em MÉDIA"
+    if not source:
+        return "internal", "arquivo ilegível; confiança mantida em MÉDIA"
 
     index = _OriginIndex(source)
     best, detail = None, ""
@@ -350,7 +298,7 @@ def normalize_bandit(payload: dict, repo: str) -> tuple[list[Finding], int]:
         if rule is None:                      # fora do mandato -> descarta
             discarded += 1
             continue
-        rel = _rel(issue.get("filename", ""), repo)
+        rel = rel_path(issue.get("filename", ""), repo)
         line = int(issue.get("line_number", 0) or 0)
         description = issue.get("issue_text", "").strip()
         confidence = Confidence.MEDIA
@@ -375,7 +323,7 @@ def normalize_bandit(payload: dict, repo: str) -> tuple[list[Finding], int]:
             description=description,
             file=rel,
             line=line,
-            evidence=_snippet(repo, rel, line),
+            evidence=snippet(repo, rel, line),
             severity=rule["severity"],
             confidence=confidence,
             effort_points=rule["effort"],
@@ -389,7 +337,7 @@ def normalize_bandit(payload: dict, repo: str) -> tuple[list[Finding], int]:
 
 
 def run_bandit(repo: str) -> tuple[list[Finding], ToolRun]:
-    ok, out, err = _run(["bandit", "-r", repo, "-f", "json", "-q"])
+    ok, out, err = run_tool(["bandit", "-r", repo, "-f", "json", "-q"])
     if not ok:
         return [], ToolRun("bandit", available=False, ok=False, error=err)
     try:
@@ -414,7 +362,7 @@ def normalize_radon(payload: dict, repo: str) -> list[Finding]:
     for path, blocks in sorted(payload.items()):
         if not isinstance(blocks, list):      # radon reporta erro por arquivo
             continue
-        rel = _rel(path, repo)
+        rel = rel_path(path, repo)
         for block in blocks:
             cc = int(block.get("complexity", 0) or 0)
             if cc < CC_FLOOR:
@@ -437,7 +385,7 @@ def normalize_radon(payload: dict, repo: str) -> list[Finding]:
                 ),
                 file=rel,
                 line=line,
-                evidence=_snippet(repo, rel, line),
+                evidence=snippet(repo, rel, line),
                 severity=severity,
                 confidence=Confidence.ALTA,   # métrica objetiva, não heurística
                 effort_points=effort,
@@ -448,7 +396,7 @@ def normalize_radon(payload: dict, repo: str) -> list[Finding]:
 
 
 def run_radon(repo: str) -> tuple[list[Finding], ToolRun]:
-    ok, out, err = _run(["radon", "cc", repo, "-j"])
+    ok, out, err = run_tool(["radon", "cc", repo, "-j"])
     if not ok:
         return [], ToolRun("radon", available=False, ok=False, error=err)
     try:
@@ -468,7 +416,7 @@ def normalize_pylint(payload: list, repo: str) -> tuple[list[Finding], int]:
         if rule is None:
             discarded += 1
             continue
-        rel = _rel(msg.get("path", ""), repo)
+        rel = rel_path(msg.get("path", ""), repo)
         line = int(msg.get("line", 0) or 0)
         findings.append(Finding(
             rule_id=f"pylint:{symbol}",
@@ -479,7 +427,7 @@ def normalize_pylint(payload: list, repo: str) -> tuple[list[Finding], int]:
             description=msg.get("message", "").strip(),
             file=rel,
             line=line,
-            evidence=_snippet(repo, rel, line),
+            evidence=snippet(repo, rel, line),
             severity=rule["severity"],
             confidence=Confidence.ALTA,
             effort_points=rule["effort"],
@@ -492,7 +440,7 @@ def normalize_pylint(payload: list, repo: str) -> tuple[list[Finding], int]:
 def run_pylint(repo: str) -> tuple[list[Finding], ToolRun]:
     # --disable=C apenas. Desabilitar R também (como sugere o FERRAMENTAS.md)
     # mataria too-many-branches/locals, que são justamente o que aproveitamos.
-    ok, out, err = _run(["pylint", repo, "--output-format=json", "--disable=C"])
+    ok, out, err = run_tool(["pylint", repo, "--output-format=json", "--disable=C"])
     if not ok:
         return [], ToolRun("pylint", available=False, ok=False, error=err)
     try:
@@ -514,7 +462,7 @@ def corroborate_with_semgrep(repo: str, findings: list[Finding], timeout: int = 
     já classificada como BAIXA pela análise de dict-literal — ver comentário do
     bloco anti-falso-positivo. Precisa de internet; falhar aqui é aceitável.
     """
-    ok, out, err = _run(
+    ok, out, err = run_tool(
         ["semgrep", "--config=p/owasp-top-ten", "--json", "--metrics=off", "-q", repo],
         timeout=timeout,
     )
@@ -531,7 +479,7 @@ def corroborate_with_semgrep(repo: str, findings: list[Finding], timeout: int = 
         check = hit.get("check_id", "")
         if "sql" not in check and "taint" not in check:
             continue
-        rel = _rel(hit.get("path", ""), repo)
+        rel = rel_path(hit.get("path", ""), repo)
         start = int(hit.get("start", {}).get("line", 0) or 0)
         end = int(hit.get("end", {}).get("line", start) or start)
         for ln in range(start, end + 1):

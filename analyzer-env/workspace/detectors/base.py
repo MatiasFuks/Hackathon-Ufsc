@@ -9,12 +9,10 @@ mecânica de rodar a ferramenta. Duplicar isso por detector seria reproduzir no
 nosso pipeline o DT-12 do código-alvo (duplicação divergente), que é
 justamente o débito que estamos reportando.
 
-Nota para o time
-----------------
-`detectors/python.py` tem cópias locais equivalentes de `ToolRun`, `_run`,
-`_rel` e `_snippet`, escritas antes deste módulo. Colapsar as duas é uma
-troca de import de uma linha lá, mas foi deixada para quando ninguém estiver
-com o arquivo aberto — não vale um conflito de merge no meio do hackathon.
+Consumidores
+------------
+`detectors/python.py` e `detectors/php.py` importam estes primitivos daqui.
+As cópias locais que existiam no detector de Python foram removidas.
 """
 from __future__ import annotations
 
